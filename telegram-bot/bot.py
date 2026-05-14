@@ -2,8 +2,9 @@
 
 import os
 import uuid
+import asyncio
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -46,37 +47,70 @@ def get_user_data(context: ContextTypes.DEFAULT_TYPE) -> dict:
     return context.user_data["session"]
 
 
+async def post_init(application):
+    """Set bot commands menu after startup."""
+    commands = [
+        BotCommand("start", "Mulai & panduan penggunaan"),
+        BotCommand("model", "Pilih model Kling AI"),
+        BotCommand("cfg", "Atur CFG Scale (0-1)"),
+        BotCommand("prompt", "Atur prompt deskripsi"),
+        BotCommand("status", "Lihat pengaturan saat ini"),
+        BotCommand("generate", "Generate video sekarang"),
+        BotCommand("reset", "Reset semua pengaturan"),
+    ]
+    await application.bot.set_my_commands(commands)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     session = get_user_data(context)
+    model_name = next((name for mid, name in MODELS_LIST if mid == session["model"]), session["model"])
+
+    keyboard = [
+        [InlineKeyboardButton("Pilih Model", callback_data="menu:model"),
+         InlineKeyboardButton("Pengaturan", callback_data="menu:status")],
+        [InlineKeyboardButton("Reset", callback_data="menu:reset")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "🎬 *Motion Control Bot*\n\n"
-        "Generate motion control videos using Kling AI.\n\n"
-        "*How to use:*\n"
-        "1. Send a *photo* (reference character)\n"
-        "2. Send a *video* (motion source)\n"
-        "3. Bot will generate the motion control video!\n\n"
-        "*Commands:*\n"
-        "/model — Select model\n"
-        "/cfg `0.5` — Set CFG scale (0-1)\n"
-        "/prompt `text` — Set prompt\n"
-        "/status — Show current settings\n"
-        "/generate — Generate video (if image & video already set)\n"
-        "/reset — Reset all settings\n\n"
-        f"*Current model:* `{session['model']}`\n"
-        f"*CFG Scale:* `{session['cfg_scale']}`",
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬  *MOTION CONTROL BOT*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Transfer gerakan dari video ke karakter!\n\n"
+        "📌 *Cara Pakai:*\n"
+        "┣ 1️⃣ Kirim *foto* (karakter referensi)\n"
+        "┣ 2️⃣ Kirim *video* (sumber gerakan)\n"
+        "┗ 3️⃣ Tunggu hasilnya!\n\n"
+        "⚙️ *Pengaturan Saat Ini:*\n"
+        f"┣ Model: `{model_name}`\n"
+        f"┣ CFG Scale: `{session['cfg_scale']}`\n"
+        f"┗ Prompt: _{session['prompt'] or 'kosong'}_\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━",
         parse_mode="Markdown",
+        reply_markup=reply_markup,
     )
 
 
 async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /model command — show model selection keyboard."""
+    session = get_user_data(context)
+    current = session["model"]
+
     keyboard = []
     for model_id, model_name in MODELS_LIST:
-        keyboard.append([InlineKeyboardButton(model_name, callback_data=f"model:{model_id}")])
+        check = " ✓" if model_id == current else ""
+        keyboard.append([InlineKeyboardButton(f"{model_name}{check}", callback_data=f"model:{model_id}")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🤖 Select a model:", reply_markup=reply_markup)
+    await update.message.reply_text(
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "🤖  *PILIH MODEL*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Pilih model Kling AI yang ingin digunakan:",
+        parse_mode="Markdown",
+        reply_markup=reply_markup,
+    )
 
 
 async def model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,7 +123,60 @@ async def model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session["model"] = model_id
 
     model_name = next((name for mid, name in MODELS_LIST if mid == model_id), model_id)
-    await query.edit_message_text(f"✅ Model set to: *{model_name}*", parse_mode="Markdown")
+    await query.edit_message_text(
+        f"✅ Model dipilih: *{model_name}*\n\n"
+        f"Kirim foto & video untuk mulai generate!",
+        parse_mode="Markdown",
+    )
+
+
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle menu button callbacks."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data.replace("menu:", "")
+
+    if action == "model":
+        session = get_user_data(context)
+        current = session["model"]
+        keyboard = []
+        for model_id, model_name in MODELS_LIST:
+            check = " ✓" if model_id == current else ""
+            keyboard.append([InlineKeyboardButton(f"{model_name}{check}", callback_data=f"model:{model_id}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "🤖  *PILIH MODEL*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Pilih model Kling AI:",
+            parse_mode="Markdown",
+            reply_markup=reply_markup,
+        )
+
+    elif action == "status":
+        session = get_user_data(context)
+        model_name = next((name for mid, name in MODELS_LIST if mid == session["model"]), session["model"])
+        await query.edit_message_text(
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚙️  *PENGATURAN*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"┣ 🤖 Model: *{model_name}*\n"
+            f"┣ 🎚️ CFG Scale: `{session['cfg_scale']}`\n"
+            f"┣ 💬 Prompt: _{session['prompt'] or 'kosong'}_\n"
+            f"┣ 🖼️ Image: {'✅ Ready' if session['image_url'] else '⬜ Belum'}\n"
+            f"┗ 🎥 Video: {'✅ Ready' if session['video_url'] else '⬜ Belum'}\n",
+            parse_mode="Markdown",
+        )
+
+    elif action == "reset":
+        context.user_data["session"] = {
+            "model": "kling-2.6-standard",
+            "cfg_scale": 0.5,
+            "prompt": "",
+            "image_url": None,
+            "video_url": None,
+        }
+        await query.edit_message_text("🔄 Semua pengaturan di-reset ke default!")
 
 
 async def cfg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -101,14 +188,17 @@ async def cfg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             value = float(context.args[0])
             if 0 <= value <= 1:
                 session["cfg_scale"] = value
-                await update.message.reply_text(f"✅ CFG Scale set to: `{value}`", parse_mode="Markdown")
+                await update.message.reply_text(f"✅ CFG Scale: `{value}`", parse_mode="Markdown")
             else:
-                await update.message.reply_text("❌ CFG Scale must be between 0 and 1")
+                await update.message.reply_text("❌ CFG Scale harus antara 0 dan 1")
         except ValueError:
-            await update.message.reply_text("❌ Invalid number. Usage: `/cfg 0.5`", parse_mode="Markdown")
+            await update.message.reply_text("❌ Format salah. Contoh: `/cfg 0.5`", parse_mode="Markdown")
     else:
         await update.message.reply_text(
-            f"Current CFG Scale: `{session['cfg_scale']}`\n\nUsage: `/cfg 0.5`",
+            f"🎚️ CFG Scale saat ini: `{session['cfg_scale']}`\n\n"
+            f"Cara ubah: `/cfg 0.5`\n"
+            f"• 0 = lebih kreatif\n"
+            f"• 1 = lebih faithful",
             parse_mode="Markdown",
         )
 
@@ -120,29 +210,32 @@ async def prompt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args and len(context.args) > 0:
         prompt_text = " ".join(context.args)
         session["prompt"] = prompt_text
-        await update.message.reply_text(f"✅ Prompt set to:\n_{prompt_text}_", parse_mode="Markdown")
+        await update.message.reply_text(f"✅ Prompt:\n_{prompt_text}_", parse_mode="Markdown")
     else:
-        current = session["prompt"] or "(empty)"
+        current = session["prompt"] or "(kosong)"
         await update.message.reply_text(
-            f"Current prompt: _{current}_\n\nUsage: `/prompt dancing in the rain`",
+            f"💬 Prompt saat ini: _{current}_\n\n"
+            f"Cara ubah: `/prompt dancing in the rain`",
             parse_mode="Markdown",
         )
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /status command — show current settings."""
+    """Handle /status command."""
     session = get_user_data(context)
     model_name = next((name for mid, name in MODELS_LIST if mid == session["model"]), session["model"])
 
-    text = (
-        "📋 *Current Settings*\n\n"
-        f"*Model:* {model_name}\n"
-        f"*CFG Scale:* `{session['cfg_scale']}`\n"
-        f"*Prompt:* _{session['prompt'] or '(none)'}_\n"
-        f"*Image:* {'✅ Set' if session['image_url'] else '❌ Not set'}\n"
-        f"*Video:* {'✅ Set' if session['video_url'] else '❌ Not set'}\n"
+    await update.message.reply_text(
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚙️  *PENGATURAN*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"┣ 🤖 Model: *{model_name}*\n"
+        f"┣ 🎚️ CFG Scale: `{session['cfg_scale']}`\n"
+        f"┣ 💬 Prompt: _{session['prompt'] or 'kosong'}_\n"
+        f"┣ 🖼️ Image: {'✅ Ready' if session['image_url'] else '⬜ Belum'}\n"
+        f"┗ 🎥 Video: {'✅ Ready' if session['video_url'] else '⬜ Belum'}\n",
+        parse_mode="Markdown",
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -154,78 +247,98 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "image_url": None,
         "video_url": None,
     }
-    await update.message.reply_text("🔄 All settings reset to default.")
+    await update.message.reply_text("🔄 Semua pengaturan di-reset ke default!")
 
 
 async def save_file(file_obj, extension: str) -> str:
     """Download and save a file, return the public URL."""
     filename = f"{uuid.uuid4().hex}.{extension}"
     filepath = os.path.join(UPLOAD_DIR, filename)
-
     await file_obj.download_to_drive(filepath)
-
-    # Return public URL
     public_url = f"{BASE_URL}{UPLOAD_URL_PATH}/{filename}"
     return public_url
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle photo messages — save as reference image."""
+    """Handle photo messages — save as reference image, delete original."""
     session = get_user_data(context)
 
-    msg = await update.message.reply_text("📷 Uploading image...")
+    msg = await update.message.reply_text("📷 Mengupload gambar...")
 
     try:
-        photo = update.message.photo[-1]  # highest resolution
+        photo = update.message.photo[-1]
         file = await photo.get_file()
         url = await save_file(file, "jpg")
-
         session["image_url"] = url
-        await msg.edit_text(
-            f"✅ *Reference image set!*\n\n"
-            f"{'Now send a *video* for motion source.' if not session['video_url'] else 'Both image and video ready! Use /generate to start.'}\n",
-            parse_mode="Markdown",
-        )
 
-        # Auto-generate if both are set
+        # Delete the user's photo message to keep chat clean
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
         if session["image_url"] and session["video_url"]:
-            await msg.edit_text("✅ *Reference image set!*\n\n🎬 Both files ready! Generating video...", parse_mode="Markdown")
-            await do_generate(update, context)
+            await msg.edit_text(
+                "✅ *Gambar diterima!*\n\n"
+                "🖼️ Image: ✅\n"
+                "🎥 Video: ✅\n\n"
+                "🎬 Memulai generate...",
+                parse_mode="Markdown",
+            )
+            await do_generate(update, context, msg)
+        else:
+            await msg.edit_text(
+                "✅ *Gambar diterima!*\n\n"
+                "🖼️ Image: ✅\n"
+                "🎥 Video: ⬜ *Kirim video untuk melanjutkan*",
+                parse_mode="Markdown",
+            )
 
     except Exception as e:
-        await msg.edit_text(f"❌ Failed to upload image: {e}")
+        await msg.edit_text(f"❌ Gagal upload gambar: {e}")
 
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle video/animation messages — save as motion source."""
+    """Handle video/animation messages — save as motion source, delete original."""
     session = get_user_data(context)
 
-    msg = await update.message.reply_text("🎥 Uploading video...")
+    msg = await update.message.reply_text("🎥 Mengupload video...")
 
     try:
         video = update.message.video or update.message.animation
         if not video:
-            await msg.edit_text("❌ No video detected. Please send a video file.")
+            await msg.edit_text("❌ Video tidak terdeteksi.")
             return
 
         file = await video.get_file()
-        ext = "mp4"
-        url = await save_file(file, ext)
-
+        url = await save_file(file, "mp4")
         session["video_url"] = url
-        await msg.edit_text(
-            f"✅ *Motion video set!*\n\n"
-            f"{'Now send a *photo* for reference character.' if not session['image_url'] else 'Both image and video ready! Use /generate to start.'}\n",
-            parse_mode="Markdown",
-        )
 
-        # Auto-generate if both are set
+        # Delete the user's video message to keep chat clean
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
         if session["image_url"] and session["video_url"]:
-            await msg.edit_text("✅ *Motion video set!*\n\n🎬 Both files ready! Generating video...", parse_mode="Markdown")
-            await do_generate(update, context)
+            await msg.edit_text(
+                "✅ *Video diterima!*\n\n"
+                "🖼️ Image: ✅\n"
+                "🎥 Video: ✅\n\n"
+                "🎬 Memulai generate...",
+                parse_mode="Markdown",
+            )
+            await do_generate(update, context, msg)
+        else:
+            await msg.edit_text(
+                "✅ *Video diterima!*\n\n"
+                "🖼️ Image: ⬜ *Kirim foto untuk melanjutkan*\n"
+                "🎥 Video: ✅",
+                parse_mode="Markdown",
+            )
 
     except Exception as e:
-        await msg.edit_text(f"❌ Failed to upload video: {e}")
+        await msg.edit_text(f"❌ Gagal upload video: {e}")
 
 
 async def generate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -233,27 +346,33 @@ async def generate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session = get_user_data(context)
 
     if not session["image_url"]:
-        await update.message.reply_text("❌ No reference image set. Send a photo first.")
+        await update.message.reply_text("❌ Belum ada gambar. Kirim foto dulu.")
         return
     if not session["video_url"]:
-        await update.message.reply_text("❌ No motion video set. Send a video first.")
+        await update.message.reply_text("❌ Belum ada video. Kirim video dulu.")
         return
 
-    await do_generate(update, context)
+    msg = await update.message.reply_text("🎬 Memulai generate...")
+    await do_generate(update, context, msg)
 
 
-async def do_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def do_generate(update: Update, context: ContextTypes.DEFAULT_TYPE, msg=None):
     """Execute the video generation process."""
     session = get_user_data(context)
-
     model_name = next((name for mid, name in MODELS_LIST if mid == session["model"]), session["model"])
 
-    msg = await update.effective_message.reply_text(
-        f"🎬 *Generating video...*\n\n"
-        f"*Model:* {model_name}\n"
-        f"*CFG:* {session['cfg_scale']}\n"
-        f"*Prompt:* _{session['prompt'] or '(none)'}_\n\n"
-        f"⏳ This may take 1-5 minutes...",
+    if not msg:
+        msg = await update.effective_message.reply_text("🎬 Memulai generate...")
+
+    await msg.edit_text(
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬  *GENERATING VIDEO*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"┣ 🤖 Model: *{model_name}*\n"
+        f"┣ 🎚️ CFG: `{session['cfg_scale']}`\n"
+        f"┗ 💬 Prompt: _{session['prompt'] or 'kosong'}_\n\n"
+        "⏳ Estimasi 1-5 menit...\n"
+        "━━━━━━━━━━━━━━━━━━━━━",
         parse_mode="Markdown",
     )
 
@@ -262,11 +381,15 @@ async def do_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def on_status(status: str):
         if status != last_status[0]:
             last_status[0] = status
+            status_emoji = "🔄" if status == "processing" else "⏳"
             try:
                 await msg.edit_text(
-                    f"🎬 *Generating video...*\n\n"
-                    f"*Status:* `{status}`\n"
-                    f"⏳ Please wait...",
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    "🎬  *GENERATING VIDEO*\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"{status_emoji} Status: `{status}`\n\n"
+                    "⏳ Mohon tunggu...\n"
+                    "━━━━━━━━━━━━━━━━━━━━━",
                     parse_mode="Markdown",
                 )
             except Exception:
@@ -282,28 +405,47 @@ async def do_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if "error" in result:
-        await msg.edit_text(f"❌ *Generation failed:*\n\n`{result['error']}`", parse_mode="Markdown")
+        await msg.edit_text(
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "❌  *GENERATION GAGAL*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"`{result['error']}`\n\n"
+            "Coba lagi dengan /generate",
+            parse_mode="Markdown",
+        )
         return
 
     video_url = result["video_url"]
 
-    await msg.edit_text(
-        f"✅ *Video generated successfully!*\n\n"
-        f"🔗 [Download Video]({video_url})\n\n"
-        f"Sending video...",
-        parse_mode="Markdown",
-    )
+    # Delete the status message
+    try:
+        await msg.delete()
+    except Exception:
+        pass
 
     # Send video to user
     try:
         await update.effective_message.reply_video(
             video=video_url,
-            caption=f"🎬 Motion Control Video\nModel: {model_name}",
+            caption=(
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                "✅ *VIDEO BERHASIL!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🤖 Model: {model_name}\n"
+                f"🎚️ CFG: {session['cfg_scale']}\n\n"
+                "Kirim foto + video baru untuk generate lagi!"
+            ),
+            parse_mode="Markdown",
         )
     except Exception:
-        # If sending as video fails, send as link
         await update.effective_message.reply_text(
-            f"🎬 Video ready!\n\n🔗 {video_url}",
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "✅ *VIDEO BERHASIL!*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🤖 Model: {model_name}\n\n"
+            f"🔗 [Download Video]({video_url})\n\n"
+            "Kirim foto + video baru untuk generate lagi!",
+            parse_mode="Markdown",
         )
 
     # Reset image and video for next generation
@@ -320,34 +462,44 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mime = doc.mime_type or ""
 
     if mime.startswith("image/"):
-        # Treat as image
         session = get_user_data(context)
-        msg = await update.message.reply_text("📷 Uploading image...")
+        msg = await update.message.reply_text("📷 Mengupload gambar...")
         try:
             file = await doc.get_file()
             ext = mime.split("/")[-1] if "/" in mime else "jpg"
             url = await save_file(file, ext)
             session["image_url"] = url
-            await msg.edit_text("✅ *Reference image set!*", parse_mode="Markdown")
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
             if session["image_url"] and session["video_url"]:
-                await do_generate(update, context)
+                await msg.edit_text("✅ *Gambar diterima!*\n\n🎬 Memulai generate...", parse_mode="Markdown")
+                await do_generate(update, context, msg)
+            else:
+                await msg.edit_text("✅ *Gambar diterima!*\n\n🎥 Kirim video untuk melanjutkan.", parse_mode="Markdown")
         except Exception as e:
-            await msg.edit_text(f"❌ Failed: {e}")
+            await msg.edit_text(f"❌ Gagal: {e}")
 
     elif mime.startswith("video/"):
-        # Treat as video
         session = get_user_data(context)
-        msg = await update.message.reply_text("🎥 Uploading video...")
+        msg = await update.message.reply_text("🎥 Mengupload video...")
         try:
             file = await doc.get_file()
             ext = mime.split("/")[-1] if "/" in mime else "mp4"
             url = await save_file(file, ext)
             session["video_url"] = url
-            await msg.edit_text("✅ *Motion video set!*", parse_mode="Markdown")
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
             if session["image_url"] and session["video_url"]:
-                await do_generate(update, context)
+                await msg.edit_text("✅ *Video diterima!*\n\n🎬 Memulai generate...", parse_mode="Markdown")
+                await do_generate(update, context, msg)
+            else:
+                await msg.edit_text("✅ *Video diterima!*\n\n🖼️ Kirim foto untuk melanjutkan.", parse_mode="Markdown")
         except Exception as e:
-            await msg.edit_text(f"❌ Failed: {e}")
+            await msg.edit_text(f"❌ Gagal: {e}")
 
 
 def main():
@@ -356,7 +508,7 @@ def main():
         print("ERROR: TELEGRAM_BOT_TOKEN not set in .env")
         return
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
 
     # Commands
     app.add_handler(CommandHandler("start", start))
@@ -369,6 +521,7 @@ def main():
 
     # Callbacks
     app.add_handler(CallbackQueryHandler(model_callback, pattern=r"^model:"))
+    app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
 
     # Message handlers
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
