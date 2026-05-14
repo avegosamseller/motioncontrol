@@ -224,18 +224,21 @@ export default function Home() {
         return;
       }
 
-      const id = data.data?.id || data.id || data.task_id;
+      // Try to extract task ID from various response formats
+      const id = data.data?.id || data.data?.task_id || data.id || data.task_id || data.taskId || data.data?.taskId;
       if (id) {
         setTaskId(id);
         setTaskStatus("processing");
         setStatusMessage("Task submitted. Waiting for processing...");
       } else {
+        // Maybe the response already contains the video
         const videoResultUrl = extractVideoUrl(data);
         if (videoResultUrl) {
           setResultVideoUrl(videoResultUrl);
           setTaskStatus("completed");
         } else {
-          setError("No task ID returned from API");
+          // Show the actual API response for debugging
+          setError(`No task ID found in API response. Response: ${JSON.stringify(data).substring(0, 300)}`);
           setTaskStatus("failed");
         }
       }
