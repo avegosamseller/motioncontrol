@@ -142,11 +142,21 @@ export default function Home() {
         return;
       }
 
-      const status = data.data?.status || data.status || "";
+      const status = (data.data?.status || data.status || "").toLowerCase();
       setStatusMessage(`Status: ${status}`);
 
       if (status === "completed" || status === "succeed" || status === "done") {
-        const videoResultUrl = extractVideoUrl(data);
+        // Extract video URL from various response formats
+        let videoResultUrl = extractVideoUrl(data);
+        
+        // Also check "generated" array (Magnific format: { data: { generated: ["url"] } })
+        if (!videoResultUrl && data.data?.generated && Array.isArray(data.data.generated) && data.data.generated.length > 0) {
+          videoResultUrl = data.data.generated[0];
+        }
+        if (!videoResultUrl && data.generated && Array.isArray(data.generated) && data.generated.length > 0) {
+          videoResultUrl = data.generated[0];
+        }
+
         if (videoResultUrl) {
           setResultVideoUrl(videoResultUrl);
           setTaskStatus("completed");
