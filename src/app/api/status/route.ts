@@ -38,7 +38,29 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const data = await response.json();
+    // Handle non-JSON responses gracefully
+    const contentType = response.headers.get("content-type") || "";
+    let data;
+
+    if (contentType.includes("application/json")) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      if (!response.ok) {
+        return NextResponse.json(
+          { error: `API returned an error (${response.status}): ${text}` },
+          { status: response.status }
+        );
+      }
+      try {
+        data = JSON.parse(text);
+      } catch {
+        return NextResponse.json(
+          { error: `Unexpected API response: ${text.substring(0, 200)}` },
+          { status: 500 }
+        );
+      }
+    }
 
     if (!response.ok) {
       return NextResponse.json(

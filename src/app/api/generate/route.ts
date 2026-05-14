@@ -7,6 +7,10 @@ const MODEL_ENDPOINTS: Record<string, string> = {
   "kling-3.0-pro": "https://api.magnific.com/v1/ai/video/kling-v3-motion-control-pro",
 };
 
+function isValidUrl(str: string): boolean {
+  return str.startsWith("http://") || str.startsWith("https://");
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -40,6 +44,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate that URLs are actual public URLs, not base64 data
+    if (!isValidUrl(imageUrl)) {
+      return NextResponse.json(
+        { error: "Image must be a public URL (https://...). File uploads are not supported directly — please upload your image to a hosting service first and paste the URL." },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidUrl(videoUrl)) {
+      return NextResponse.json(
+        { error: "Video must be a public URL (https://...). File uploads are not supported directly — please upload your video to a hosting service first and paste the URL." },
+        { status: 400 }
+      );
+    }
+
     const endpoint = MODEL_ENDPOINTS[model];
 
     const payload: Record<string, unknown> = {
@@ -64,11 +83,34 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
+    // Handle non-JSON responses gracefully
+    const contentType = response.headers.get("content-type") || "";
+    let data;
+
+    if (contentType.includes("application/json")) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      if (!response.ok) {
+        return NextResponse.json(
+          { error: `API returned an error (${response.status}): ${text}` },
+          { status: response.status }
+        );
+      }
+      // Try parsing as JSON anyway
+      try {
+        data = JSON.parse(text);
+      } catch {
+        return NextResponse.json(
+          { error: `Unexpected API response: ${text.substring(0, 200)}` },
+          { status: 500 }
+        );
+      }
+    }
 
     if (!response.ok) {
       return NextResponse.json(
-        { error: data.message || data.error || "API request failed", details: data },
+        { error: data.message || data.error || `API request failed (${response.status})`, details: data },
         { status: response.status }
       );
     }
