@@ -41,43 +41,22 @@ export default function Home() {
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   const uploadFile = async (file: File): Promise<string> => {
-    // Try direct upload to catbox.moe first (from browser)
+    // Upload via our server-side proxy to catbox.moe
     const formData = new FormData();
-    formData.append("reqtype", "fileupload");
-    formData.append("fileToUpload", file);
+    formData.append("file", file);
 
-    try {
-      const response = await fetch("https://catbox.moe/user/api.php", {
-        method: "POST",
-        body: formData,
-      });
+    const response = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
 
-      const text = await response.text();
+    const data = await response.json();
 
-      if (response.ok && text.trim().startsWith("https://")) {
-        return text.trim();
-      }
-
-      // If direct upload fails (CORS), fallback to our API route
-      throw new Error("Direct upload failed, trying proxy...");
-    } catch {
-      // Fallback: upload via our server-side proxy
-      const proxyForm = new FormData();
-      proxyForm.append("file", file);
-
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: proxyForm,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Upload failed");
-      }
-
-      return data.url;
+    if (!response.ok) {
+      throw new Error(data.error || "Upload failed");
     }
+
+    return data.url;
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
