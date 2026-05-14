@@ -1,6 +1,7 @@
 """Magnific API helper for video generation."""
 
 import asyncio
+import logging
 import aiohttp
 from config import (
     MAGNIFIC_API_KEY,
@@ -9,6 +10,8 @@ from config import (
     POLL_INTERVAL,
     POLL_TIMEOUT,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def generate_video(
@@ -41,11 +44,15 @@ async def generate_video(
 
     async with aiohttp.ClientSession() as session:
         async with session.post(endpoint, json=payload, headers=headers) as resp:
+            logger.info(f"Generate request to {endpoint} - Status: {resp.status}")
             if resp.content_type == "application/json":
                 data = await resp.json()
             else:
                 text = await resp.text()
+                logger.error(f"Non-JSON response: {text[:200]}")
                 return {"error": f"API error ({resp.status}): {text[:200]}"}
+
+            logger.info(f"Generate response: {str(data)[:300]}")
 
             if resp.status != 200:
                 error_msg = data.get("message") or data.get("error") or f"API error ({resp.status})"
@@ -132,9 +139,7 @@ async def generate_and_wait(
     Returns: {"video_url": "..."} or {"error": "..."}
     """
     # Submit task
-    result = generate_video(model, image_url, video_url, prompt, cfg_scale)
-    if asyncio.iscoroutine(result):
-        result = await result
+    result = await generate_video(model, image_url, video_url, prompt, cfg_scale)
 
     if "error" in result:
         return result
@@ -167,7 +172,15 @@ async def generate_and_wait(
                 return {"error": "Completed but no video URL found"}
 
         elif status in ("failed", "error"):
-            error_msg = status_data.get("data", {}).get("error") or "Generation failed"
+            d = status_data.get("data", {})
+            error_msg = (
+                d.get("error")
+                or d.get("message")
+                or d.get("failure_reason")
+                or status_data.get("error")
+                or status_data.get("message")
+                or f"Generation failed. Full response: {str(status_data)[:300]}"
+            )
             return {"error": error_msg}
 
     return {"error": f"Timeout after {POLL_TIMEOUT}s. Task ID: {task_id}"}
