@@ -16,18 +16,18 @@ UPLOAD_URL_PATH = os.getenv("UPLOAD_URL_PATH", "/uploads")
 
 # Model endpoints for generation
 MODEL_ENDPOINTS = {
-    "kling-2.6-standard": "https://api.magnific.com/v1/ai/video/kling-v2-6-motion-control-std",
-    "kling-2.6-pro": "https://api.magnific.com/v1/ai/video/kling-v2-6-motion-control-pro",
-    "kling-3.0-standard": "https://api.magnific.com/v1/ai/video/kling-v3-motion-control-std",
-    "kling-3.0-pro": "https://api.magnific.com/v1/ai/video/kling-v3-motion-control-pro",
+    "kling-2.6-standard": "https://api.freepik.com/v1/ai/video/kling-v2-6-motion-control-std",
+    "kling-2.6-pro": "https://api.freepik.com/v1/ai/video/kling-v2-6-motion-control-pro",
+    "kling-3.0-standard": "https://api.freepik.com/v1/ai/video/kling-v3-motion-control-std",
+    "kling-3.0-pro": "https://api.freepik.com/v1/ai/video/kling-v3-motion-control-pro",
 }
 
 # Status check endpoints
 MODEL_STATUS_ENDPOINTS = {
-    "kling-2.6-standard": "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6",
-    "kling-2.6-pro": "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6",
-    "kling-3.0-standard": "https://api.magnific.com/v1/ai/video/kling-v3-motion-control-std",
-    "kling-3.0-pro": "https://api.magnific.com/v1/ai/video/kling-v3-motion-control-pro",
+    "kling-2.6-standard": "https://api.freepik.com/v1/ai/image-to-video/kling-v2-6",
+    "kling-2.6-pro": "https://api.freepik.com/v1/ai/image-to-video/kling-v2-6",
+    "kling-3.0-standard": "https://api.freepik.com/v1/ai/video/kling-v3-motion-control-std",
+    "kling-3.0-pro": "https://api.freepik.com/v1/ai/video/kling-v3-motion-control-pro",
 }
 
 # Available models for display

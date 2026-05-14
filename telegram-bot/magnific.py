@@ -29,6 +29,7 @@ async def generate_video(
     payload = {
         "image_url": image_url,
         "video_url": video_url,
+        "character_orientation": "video",
     }
 
     if prompt.strip():
@@ -39,7 +40,7 @@ async def generate_video(
 
     headers = {
         "Content-Type": "application/json",
-        "x-magnific-api-key": MAGNIFIC_API_KEY,
+        "x-freepik-api-key": MAGNIFIC_API_KEY,
     }
 
     async with aiohttp.ClientSession() as session:
@@ -70,7 +71,7 @@ async def check_status(model: str, task_id: str) -> dict:
     endpoint = f"{base_endpoint}/{task_id}"
 
     headers = {
-        "x-magnific-api-key": MAGNIFIC_API_KEY,
+        "x-freepik-api-key": MAGNIFIC_API_KEY,
     }
 
     async with aiohttp.ClientSession() as session:
