@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
 type TaskStatus = "idle" | "submitting" | "processing" | "completed" | "failed";
+type UploadStatus = "idle" | "uploading" | "done" | "error";
 
 interface TaskResult {
   id?: string;
@@ -27,6 +28,8 @@ export default function Home() {
   const [videoUrl, setVideoUrl] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
+  const [imageUploadStatus, setImageUploadStatus] = useState<UploadStatus>("idle");
+  const [videoUploadStatus, setVideoUploadStatus] = useState<UploadStatus>("idle");
   const [taskStatus, setTaskStatus] = useState<TaskStatus>("idle");
   const [taskId, setTaskId] = useState<string | null>(null);
   const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null);
@@ -37,31 +40,73 @@ export default function Home() {
   const videoInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const uploadFile = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Upload failed");
+    }
+
+    return data.url;
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result as string;
-        setImagePreview(base64);
-        // Set empty - user must provide a public URL
-        setImageUrl("");
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    // Show preview immediately
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+
+    // Upload to catbox
+    setImageUploadStatus("uploading");
+    setError(null);
+
+    try {
+      const url = await uploadFile(file);
+      setImageUrl(url);
+      setImageUploadStatus("done");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Image upload failed";
+      setError(message);
+      setImageUploadStatus("error");
     }
   };
 
-  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result as string;
-        setVideoPreview(base64);
-        // Set empty - user must provide a public URL
-        setVideoUrl("");
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    // Show preview immediately
+    const reader = new FileReader();
+    reader.onload = () => {
+      setVideoPreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+
+    // Upload to catbox
+    setVideoUploadStatus("uploading");
+    setError(null);
+
+    try {
+      const url = await uploadFile(file);
+      setVideoUrl(url);
+      setVideoUploadStatus("done");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Video upload failed";
+      setError(message);
+      setVideoUploadStatus("error");
     }
   };
 
@@ -138,19 +183,19 @@ export default function Home() {
       return;
     }
     if (!imageUrl) {
-      setError("Please provide a public image URL (https://...)");
+      setError("Please upload a reference image or provide an image URL");
       return;
     }
     if (!videoUrl) {
-      setError("Please provide a public video URL (https://...)");
+      setError("Please upload a reference video or provide a video URL");
       return;
     }
     if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) {
-      setError("Image URL must be a public URL starting with https://. The Magnific API does not accept file uploads directly.");
+      setError("Image URL must be a public URL starting with https://");
       return;
     }
     if (!videoUrl.startsWith("http://") && !videoUrl.startsWith("https://")) {
-      setError("Video URL must be a public URL starting with https://. The Magnific API does not accept file uploads directly.");
+      setError("Video URL must be a public URL starting with https://");
       return;
     }
 
@@ -184,7 +229,6 @@ export default function Home() {
         setTaskStatus("processing");
         setStatusMessage("Task submitted. Waiting for processing...");
       } else {
-        // Maybe the response already contains the video
         const videoResultUrl = extractVideoUrl(data);
         if (videoResultUrl) {
           setResultVideoUrl(videoResultUrl);
@@ -207,6 +251,38 @@ export default function Home() {
     setResultVideoUrl(null);
     setError(null);
     setStatusMessage("");
+  };
+
+  const UploadBadge = ({ status }: { status: UploadStatus }) => {
+    if (status === "uploading") {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-yellow-900/50 text-yellow-300 border border-yellow-700">
+          <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          Uploading...
+        </span>
+      );
+    }
+    if (status === "done") {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-green-900/50 text-green-300 border border-green-700">
+          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          Uploaded
+        </span>
+      );
+    }
+    if (status === "error") {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-900/50 text-red-300 border border-red-700">
+          Failed
+        </span>
+      );
+    }
+    return null;
   };
 
   return (
@@ -264,12 +340,19 @@ export default function Home() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Reference Image */}
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
                 Reference Image (Character)
+                <UploadBadge status={imageUploadStatus} />
               </label>
               <div
                 onClick={() => imageInputRef.current?.click()}
-                className="border-2 border-dashed border-gray-600 rounded-lg p-4 text-center cursor-pointer hover:border-blue-500 transition-colors min-h-[200px] flex items-center justify-center"
+                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors min-h-[200px] flex items-center justify-center ${
+                  imageUploadStatus === "uploading"
+                    ? "border-yellow-600 bg-yellow-900/10"
+                    : imageUploadStatus === "done"
+                    ? "border-green-600 bg-green-900/10"
+                    : "border-gray-600 hover:border-blue-500"
+                }`}
               >
                 {imagePreview ? (
                   <img
@@ -282,8 +365,8 @@ export default function Home() {
                     <svg className="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
-                    <p className="text-sm">Click to preview image</p>
-                    <p className="text-xs mt-1">URL required below</p>
+                    <p className="text-sm">Click to upload image</p>
+                    <p className="text-xs mt-1 text-gray-500">Auto-hosted to catbox.moe</p>
                   </div>
                 )}
               </div>
@@ -296,26 +379,34 @@ export default function Home() {
               />
               <input
                 type="text"
-                value={imageUrl.startsWith("data:") ? "" : imageUrl}
+                value={imageUrl}
                 onChange={(e) => {
                   setImageUrl(e.target.value);
                   if (e.target.value) {
                     setImagePreview(e.target.value);
+                    setImageUploadStatus("idle");
                   }
                 }}
-                placeholder="Paste image URL (https://...)*"
+                placeholder="Or paste image URL (https://...)"
                 className="w-full mt-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             {/* Reference Video */}
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
                 Reference Video (Motion Source)
+                <UploadBadge status={videoUploadStatus} />
               </label>
               <div
                 onClick={() => videoInputRef.current?.click()}
-                className="border-2 border-dashed border-gray-600 rounded-lg p-4 text-center cursor-pointer hover:border-blue-500 transition-colors min-h-[200px] flex items-center justify-center"
+                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors min-h-[200px] flex items-center justify-center ${
+                  videoUploadStatus === "uploading"
+                    ? "border-yellow-600 bg-yellow-900/10"
+                    : videoUploadStatus === "done"
+                    ? "border-green-600 bg-green-900/10"
+                    : "border-gray-600 hover:border-blue-500"
+                }`}
               >
                 {videoPreview ? (
                   <video
@@ -329,8 +420,8 @@ export default function Home() {
                     <svg className="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                     </svg>
-                    <p className="text-sm">Click to preview video</p>
-                    <p className="text-xs mt-1">URL required below</p>
+                    <p className="text-sm">Click to upload video</p>
+                    <p className="text-xs mt-1 text-gray-500">Auto-hosted to catbox.moe</p>
                   </div>
                 )}
               </div>
@@ -343,14 +434,15 @@ export default function Home() {
               />
               <input
                 type="text"
-                value={videoUrl.startsWith("data:") ? "" : videoUrl}
+                value={videoUrl}
                 onChange={(e) => {
                   setVideoUrl(e.target.value);
                   if (e.target.value) {
                     setVideoPreview(e.target.value);
+                    setVideoUploadStatus("idle");
                   }
                 }}
-                placeholder="Paste video URL (https://...)*"
+                placeholder="Or paste video URL (https://...)"
                 className="w-full mt-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -411,16 +503,18 @@ export default function Home() {
           {/* Submit Button */}
           <button
             onClick={taskStatus === "completed" || taskStatus === "failed" ? resetForm : handleSubmit}
-            disabled={taskStatus === "submitting" || taskStatus === "processing"}
+            disabled={taskStatus === "submitting" || taskStatus === "processing" || imageUploadStatus === "uploading" || videoUploadStatus === "uploading"}
             className={`w-full py-4 rounded-lg font-semibold text-lg transition-all ${
-              taskStatus === "submitting" || taskStatus === "processing"
+              taskStatus === "submitting" || taskStatus === "processing" || imageUploadStatus === "uploading" || videoUploadStatus === "uploading"
                 ? "bg-gray-600 text-gray-400 cursor-not-allowed"
                 : taskStatus === "completed" || taskStatus === "failed"
                 ? "bg-yellow-600 hover:bg-yellow-500 text-white"
                 : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30"
             }`}
           >
-            {taskStatus === "submitting"
+            {imageUploadStatus === "uploading" || videoUploadStatus === "uploading"
+              ? "Uploading files..."
+              : taskStatus === "submitting"
               ? "Submitting..."
               : taskStatus === "processing"
               ? "Generating Video..."
@@ -462,7 +556,7 @@ export default function Home() {
 
         {/* Footer */}
         <p className="text-center text-gray-500 text-sm mt-6">
-          Powered by Magnific API &middot; Kling AI Motion Control
+          Powered by Magnific API &middot; Kling AI Motion Control &middot; Hosted via catbox.moe
         </p>
       </div>
     </main>
