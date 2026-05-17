@@ -4,7 +4,7 @@
 
 Web application untuk generate video motion control menggunakan Kling AI (2.6 Standard/Pro, 3.0 Standard/Pro) melalui Freepik API. User upload gambar karakter referensi + video sumber gerakan, lalu AI akan mentransfer gerakan dari video ke karakter.
 
-Aplikasi ini dilengkapi dengan **API Key Rotation** dan **Proxy Server** untuk mengatasi daily rate limit dari API provider.
+Aplikasi dilengkapi dengan **API Key Rotation**, **Proxy Server**, **Queue System**, **User Auth**, **History/Gallery**, **Webhook**, **Batch Generate**, **Credit Tracking**, **Auto Compress**, dan **Download All**.
 
 ---
 
@@ -14,9 +14,12 @@ Aplikasi ini dilengkapi dengan **API Key Rotation** dan **Proxy Server** untuk m
 |----------|-----------|
 | Frontend | Next.js 14, React 18, TypeScript, Tailwind CSS |
 | Backend | Next.js API Routes (App Router) |
-| Proxy Server | Node.js / Nginx reverse proxy (self-hosted) |
-| Hosting | Vercel / Self-hosted (Nginx + Node.js) |
-| File Hosting | Self-hosted via Nginx atau cloud storage (R2, S3, dll) |
+| Database | SQLite / PostgreSQL (untuk user, history, queue) |
+| Auth | NextAuth.js atau custom JWT |
+| Proxy Server | Node.js Express (self-hosted) |
+| Queue | Bull / BullMQ (Redis-based) atau in-memory queue |
+| Hosting | Self-hosted (Nginx + Node.js) |
+| File Hosting | Self-hosted via Nginx |
 | API Provider | Freepik API (`api.freepik.com`) |
 
 ---
@@ -32,11 +35,10 @@ Aplikasi ini dilengkapi dengan **API Key Rotation** dan **Proxy Server** untuk m
 | Kling 3.0 Standard | `POST https://api.freepik.com/v1/ai/video/kling-v3-motion-control-std` | `GET https://api.freepik.com/v1/ai/video/kling-v3-motion-control-std/{task_id}` |
 | Kling 3.0 Pro | `POST https://api.freepik.com/v1/ai/video/kling-v3-motion-control-pro` | `GET https://api.freepik.com/v1/ai/video/kling-v3-motion-control-pro/{task_id}` |
 
-### Authentication
+### Authentication Header
 
 - Header: `x-freepik-api-key: <API_KEY>`
 - API Key format: `FPSXxxxxxxxxxxxxxxxxxxxxxxxxxx`
-- Dapatkan dari: https://magnific.com
 
 ### Generate Request Body
 
@@ -50,7 +52,7 @@ Aplikasi ini dilengkapi dengan **API Key Rotation** dan **Proxy Server** untuk m
 }
 ```
 
-**Catatan penting:** `character_orientation: "video"` wajib disertakan di setiap request.
+**Catatan:** `character_orientation: "video"` wajib disertakan.
 
 ### Generate Response
 
@@ -82,10 +84,10 @@ Aplikasi ini dilengkapi dengan **API Key Rotation** dan **Proxy Server** untuk m
 | Status | Meaning |
 |--------|---------|
 | `PROCESSING` | Sedang diproses |
-| `COMPLETED` | Selesai, video ready di `generated[0]` |
-| `FAILED` | Gagal (credit habis, file tidak valid, dll) |
+| `COMPLETED` | Selesai, video di `generated[0]` |
+| `FAILED` | Gagal |
 
-**Catatan:** Status dari API menggunakan **HURUF BESAR** (`COMPLETED`, `FAILED`, `PROCESSING`). Lakukan `.toLowerCase()` sebelum compare.
+**Catatan:** Status menggunakan **HURUF BESAR**. Lakukan `.toLowerCase()` sebelum compare.
 
 ---
 
@@ -93,11 +95,11 @@ Aplikasi ini dilengkapi dengan **API Key Rotation** dan **Proxy Server** untuk m
 
 | Parameter | Type | Required | Range | Description |
 |-----------|------|----------|-------|-------------|
-| `image_url` | string (URL) | Ya | - | URL publik gambar karakter referensi |
-| `video_url` | string (URL) | Ya | - | URL publik video motion source |
-| `character_orientation` | string | Ya | `"video"` | Selalu kirim "video" |
-| `prompt` | string | Tidak | - | Deskripsi tambahan untuk hasil video |
-| `cfg_scale` | float | Tidak | 0.0 - 1.0 | 0 = lebih kreatif, 1 = lebih faithful |
+| `image_url` | string (URL) | Ya | - | URL publik gambar karakter |
+| `video_url` | string (URL) | Ya | - | URL publik video motion |
+| `character_orientation` | string | Ya | `"video"` | Selalu "video" |
+| `prompt` | string | Tidak | - | Deskripsi tambahan |
+| `cfg_scale` | float | Tidak | 0.0 - 1.0 | 0=kreatif, 1=faithful |
 
 ---
 
@@ -105,66 +107,59 @@ Aplikasi ini dilengkapi dengan **API Key Rotation** dan **Proxy Server** untuk m
 
 ### Image (Reference Character)
 - Format: JPG, PNG
-- Ukuran minimum: 340px (width atau height)
-- Ukuran maksimum: 10MB
+- Min: 340px, Max: 10MB
 - Aspect ratio: 2:5 sampai 5:2
-- Harus berupa **URL publik** (accessible dari internet)
+- URL publik
 
 ### Video (Motion Source)
 - Format: MP4
-- Durasi: 2-10 detik
-- Ukuran maksimum: 10MB
-- Harus berupa **URL publik** (accessible dari internet)
+- Durasi: 2-10 detik, Max: 10MB
+- URL publik
 
 ---
 
-## API Key Rotation
+## Multi API Key Rotation
 
 ### Konsep
 
-Sistem menggunakan **multiple API keys** yang dirotasi secara otomatis untuk menghindari daily rate limit per key.
+Multiple API keys dirotasi otomatis (round-robin). Jika satu key kena daily limit, otomatis pindah ke key berikutnya.
 
 ### Konfigurasi
 
 ```env
-# Multiple API keys dipisah koma
-API_KEYS=FPSXkey1xxx,FPSXkey2xxx,FPSXkey3xxx,FPSXkey4xxx
+API_KEYS=FPSXkey1,FPSXkey2,FPSXkey3,FPSXkey4
 ```
 
-### Logika Rotation
+### Logika
 
 ```
-1. Simpan daftar API keys dalam array
-2. Track jumlah request per key per hari (counter)
-3. Track key mana yang kena rate limit (blacklist sementara)
-4. Saat mau generate:
-   a. Ambil key berikutnya yang belum kena limit (round-robin)
-   b. Jika key kena error "daily limit reached" → tandai key sebagai limited
-   c. Pindah ke key berikutnya
-   d. Jika semua key limited → return error "All API keys have reached daily limit"
-5. Reset blacklist setiap 24 jam (atau saat key berhasil digunakan lagi)
+1. Simpan keys dalam array + state (limited/available)
+2. Saat generate → ambil key berikutnya yang available
+3. Jika response = 429 / "daily limit" / "rate limit" → tandai key limited
+4. Otomatis retry dengan key berikutnya
+5. Jika semua limited → return error
+6. Reset key setelah 24 jam dari waktu limited
 ```
 
-### Data Structure
+### State Structure
 
 ```json
 {
   "keys": [
-    { "key": "FPSXkey1...", "limited": false, "lastUsed": "2025-05-15T10:00:00Z", "requestCount": 12 },
-    { "key": "FPSXkey2...", "limited": false, "lastUsed": "2025-05-15T09:55:00Z", "requestCount": 8 },
-    { "key": "FPSXkey3...", "limited": true, "limitedAt": "2025-05-15T08:00:00Z", "requestCount": 50 }
+    { "key": "FPSX...", "limited": false, "limitedAt": null, "requests": 12 },
+    { "key": "FPSX...", "limited": true, "limitedAt": "2025-05-15T08:00:00Z", "requests": 50 }
   ],
-  "currentIndex": 1
+  "currentIndex": 0
 }
 ```
 
-### Error Detection untuk Rotation
+### Error Detection
 
-Trigger pindah ke key berikutnya jika response mengandung:
-- HTTP 429 (Too Many Requests)
-- Body contains "daily limit" (case-insensitive)
-- Body contains "rate limit" (case-insensitive)
-- Body contains "quota exceeded" (case-insensitive)
+Pindah key jika:
+- HTTP 429
+- Response contains "daily limit" (case-insensitive)
+- Response contains "rate limit" (case-insensitive)
+- Response contains "quota exceeded" (case-insensitive)
 
 ---
 
@@ -172,302 +167,502 @@ Trigger pindah ke key berikutnya jika response mengandung:
 
 ### Konsep
 
-Proxy server berfungsi sebagai perantara antara web app dan Freepik API. Tujuannya:
-1. **Menyembunyikan API key** dari client (key disimpan di server)
-2. **Bypass IP-based rate limit** (request datang dari IP server, bukan IP user)
-3. **API key rotation** terjadi di proxy (user tidak perlu tahu key mana yang dipakai)
+Proxy sebagai perantara ke Freepik API. Tujuan:
+1. Sembunyikan API key dari client
+2. Bypass IP-based rate limit
+3. Handle rotation di server side
 
 ### Architecture
 
 ```
-User Browser → Web App (Vercel/Self-hosted)
-                  ↓
-              POST /api/generate
-                  ↓
-         Proxy Server (self-hosted di homeserver)
-                  ↓
-         [API Key Rotation Logic]
-                  ↓
-         api.freepik.com (dengan key yang tersedia)
-                  ↓
-         Response → kembali ke user
+User → Web App → Proxy Server (homeserver) → api.freepik.com
+                       ↓
+              [Key Rotation + Retry]
 ```
 
 ### Proxy Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/proxy/generate` | POST | Forward generate request ke Freepik API |
-| `/proxy/status/{taskId}` | GET | Forward status check ke Freepik API |
-| `/proxy/health` | GET | Check proxy status & available keys |
+| `/proxy/generate` | POST | Forward generate |
+| `/proxy/status/{taskId}` | GET | Forward status check |
+| `/proxy/health` | GET | Status proxy + key availability |
 
-### Proxy Request/Response
+### Health Response
 
-#### POST `/proxy/generate`
-
-**Request Header:**
-```
-x-proxy-api-key: <user_api_key_atau_master_key>
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "model": "kling-2.6-std",
-  "image_url": "https://...",
-  "video_url": "https://...",
-  "character_orientation": "video",
-  "cfg_scale": 0.5,
-  "prompt": "optional"
-}
-```
-
-**Response:** Forward dari Freepik API (task_id, status)
-
-#### GET `/proxy/status/{taskId}`
-
-**Request Header:**
-```
-x-proxy-api-key: <user_api_key_atau_master_key>
-```
-
-**Query Params:**
-- `model` — untuk menentukan status endpoint
-
-**Response:** Forward dari Freepik API (status, generated)
-
-#### GET `/proxy/health`
-
-**Response:**
 ```json
 {
   "status": "ok",
   "totalKeys": 4,
   "availableKeys": 3,
-  "limitedKeys": 1
-}
-```
-
-### Proxy Implementation (Node.js Express)
-
-File: `proxy/server.js`
-
-```javascript
-// Pseudocode structure
-const express = require('express');
-const app = express();
-
-// Load API keys dari env
-const API_KEYS = process.env.API_KEYS.split(',');
-
-// State tracking
-let keyStates = API_KEYS.map(key => ({
-  key,
-  limited: false,
-  limitedAt: null,
-  requestCount: 0
-}));
-let currentIndex = 0;
-
-// Get next available key (round-robin, skip limited)
-function getNextKey() {
-  for (let i = 0; i < keyStates.length; i++) {
-    const idx = (currentIndex + i) % keyStates.length;
-    const state = keyStates[idx];
-    
-    // Reset limit after 24 hours
-    if (state.limited && state.limitedAt) {
-      const hoursSinceLimited = (Date.now() - state.limitedAt) / (1000 * 60 * 60);
-      if (hoursSinceLimited >= 24) {
-        state.limited = false;
-        state.limitedAt = null;
-        state.requestCount = 0;
-      }
-    }
-    
-    if (!state.limited) {
-      currentIndex = (idx + 1) % keyStates.length;
-      return state;
-    }
-  }
-  return null; // All keys limited
-}
-
-// Mark key as limited
-function markKeyLimited(key) {
-  const state = keyStates.find(s => s.key === key);
-  if (state) {
-    state.limited = true;
-    state.limitedAt = Date.now();
-  }
-}
-
-// Check if response indicates rate limit
-function isRateLimited(status, body) {
-  if (status === 429) return true;
-  const text = JSON.stringify(body).toLowerCase();
-  return text.includes('daily limit') || 
-         text.includes('rate limit') || 
-         text.includes('quota exceeded');
-}
-
-// POST /proxy/generate
-app.post('/proxy/generate', async (req, res) => {
-  const keyState = getNextKey();
-  if (!keyState) {
-    return res.status(429).json({ error: 'All API keys have reached daily limit. Try again later.' });
-  }
-  
-  // Forward to Freepik API with selected key
-  // If rate limited → markKeyLimited → retry with next key
-  // Return response to client
-});
-
-// GET /proxy/status/:taskId
-app.get('/proxy/status/:taskId', async (req, res) => {
-  // Forward to Freepik API
-});
-
-app.listen(3002);
-```
-
-### Proxy Deployment (Homeserver)
-
-```bash
-# Install
-cd /opt/motioncontrol/proxy
-npm install
-
-# Environment
-cp .env.example .env
-nano .env
-# API_KEYS=FPSXkey1,FPSXkey2,FPSXkey3
-
-# Run
-node server.js
-
-# Systemd service
-sudo systemctl enable motioncontrol-proxy
-sudo systemctl start motioncontrol-proxy
-```
-
-Nginx config:
-```nginx
-location /proxy/ {
-    proxy_pass http://localhost:3002/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  "limitedKeys": 1,
+  "queueLength": 2
 }
 ```
 
 ---
 
-## Application Flow (dengan Proxy & Rotation)
+## Queue System
 
-### Generate Video Flow
+### Konsep
 
-```
-1. User masukkan API key (opsional jika proxy punya key sendiri)
-2. User pilih model (Kling 2.6/3.0, Standard/Pro)
-3. User upload gambar referensi → dapat URL publik
-4. User upload video motion → dapat URL publik
-5. User atur CFG scale (slider 0-1) dan prompt (opsional)
-6. User klik "Generate Video"
-7. Frontend POST ke /api/generate
-8. Backend forward ke Proxy Server (/proxy/generate)
-9. Proxy pilih API key yang tersedia (rotation)
-10. Proxy forward ke api.freepik.com
-11. Jika kena rate limit → proxy otomatis retry dengan key lain
-12. API return task_id
-13. Frontend polling GET /api/status → Proxy → api.freepik.com
-14. Saat status = "COMPLETED" → ambil URL dari data.generated[0]
-15. Tampilkan video preview + download link
-16. Stop polling
+Antrian untuk memproses request secara berurutan. Jika banyak user generate bersamaan, request masuk antrian dan diproses satu per satu (atau sesuai concurrency limit).
+
+### Konfigurasi
+
+```env
+# Maksimum task yang diproses bersamaan
+MAX_CONCURRENT=3
+
+# Maksimum antrian per user
+MAX_QUEUE_PER_USER=5
+
+# Timeout per task
+TASK_TIMEOUT=600
 ```
 
-### Rate Limit Handling Flow
+### Flow
 
 ```
-1. Proxy kirim request dengan Key A
-2. API return 429 atau "daily limit reached"
-3. Proxy tandai Key A sebagai limited
-4. Proxy otomatis retry dengan Key B
-5. Jika Key B juga limited → coba Key C
-6. Jika semua key limited → return error ke user
-7. Key A akan di-reset setelah 24 jam
+1. User submit generate request
+2. Request masuk ke queue
+3. Queue processor ambil task dari antrian
+4. Jika slot tersedia (< MAX_CONCURRENT) → proses
+5. Jika penuh → tunggu di antrian, beri nomor antrian ke user
+6. Setelah selesai → notify user, ambil task berikutnya
 ```
+
+### Queue Data Structure
+
+```json
+{
+  "id": "queue-uuid",
+  "userId": "user-123",
+  "status": "waiting|processing|completed|failed",
+  "position": 3,
+  "createdAt": "2025-05-15T10:00:00Z",
+  "startedAt": null,
+  "completedAt": null,
+  "params": {
+    "model": "kling-2.6-standard",
+    "image_url": "...",
+    "video_url": "...",
+    "prompt": "...",
+    "cfg_scale": 0.5
+  },
+  "result": {
+    "task_id": "...",
+    "video_url": "..."
+  }
+}
+```
+
+### UI Queue Status
+
+Tampilkan ke user:
+- "Posisi antrian: #3"
+- "Estimasi: ~5 menit"
+- "Sedang diproses..."
+- Progress bar
 
 ---
 
-## Web App Features
+## User Authentication
+
+### Konsep
+
+Sistem login agar tiap user punya data sendiri (history, settings, credit).
+
+### Auth Methods
+
+| Method | Description |
+|--------|-------------|
+| Email + Password | Register/login manual |
+| Google OAuth | Login dengan Google (opsional) |
+| API Key as Auth | User masukkan API key sebagai identitas (tanpa register) |
+
+### User Data Structure
+
+```json
+{
+  "id": "user-uuid",
+  "email": "user@example.com",
+  "name": "User Name",
+  "apiKey": "FPSXxxx...",
+  "createdAt": "2025-05-15T10:00:00Z",
+  "settings": {
+    "defaultModel": "kling-2.6-standard",
+    "defaultCfgScale": 0.5
+  }
+}
+```
+
+### Session
+
+- JWT token disimpan di cookie (httpOnly)
+- Expire: 7 hari
+- Refresh otomatis
+
+### Pages
+
+| Page | Path | Description |
+|------|------|-------------|
+| Login | `/login` | Form login email/password |
+| Register | `/register` | Form daftar |
+| Dashboard | `/dashboard` | Halaman utama setelah login |
+| Settings | `/settings` | Ubah API key, default model, dll |
+
+---
+
+## History / Gallery
+
+### Konsep
+
+Simpan semua riwayat generasi. User bisa melihat, download ulang, atau re-generate.
+
+### Data Structure
+
+```json
+{
+  "id": "history-uuid",
+  "userId": "user-123",
+  "createdAt": "2025-05-15T10:00:00Z",
+  "model": "kling-2.6-standard",
+  "prompt": "dancing girl",
+  "cfgScale": 0.5,
+  "imageUrl": "https://.../image.jpg",
+  "videoUrl": "https://.../video.mp4",
+  "resultUrl": "https://cdn-magnific.freepik.com/kling_xxx.mp4?token=xxx",
+  "status": "completed",
+  "taskId": "task-uuid",
+  "thumbnailUrl": "https://.../thumb.jpg"
+}
+```
+
+### UI Features
 
 | Feature | Description |
 |---------|-------------|
-| API Key Input | Password field, user masukkan API key sendiri (opsional jika pakai proxy) |
-| Model Selection | Dropdown: Kling 2.6 Std/Pro, 3.0 Std/Pro |
-| Image Upload | Upload file + auto-host, atau paste URL manual |
-| Video Upload | Upload file + auto-host, atau paste URL manual |
-| Upload Status Badge | Menampilkan: Uploading... / Uploaded ✓ / Failed |
-| Prompt Input | Textarea, optional |
-| CFG Scale Slider | Range 0-1, step 0.01, tampilkan angka saat ini |
-| Status Polling | Auto-check setiap 5 detik, tampilkan status di UI |
-| Video Preview | Video player inline setelah selesai |
-| Download Link | Direct link ke video CDN |
-| Generate Another | Reset button setelah selesai/gagal |
-| Error Handling | Pesan error jelas dengan detail API response |
-| Responsive | Mobile-friendly layout |
-| Proxy Status | Tampilkan jumlah key tersedia (opsional) |
+| Gallery Grid | Tampilkan thumbnail semua hasil |
+| Filter | Filter by model, status, tanggal |
+| Search | Cari by prompt |
+| Re-generate | Gunakan setting yang sama untuk generate ulang |
+| Delete | Hapus dari history |
+| Bulk Select | Pilih beberapa untuk download/delete |
+
+### API Routes
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/history` | GET | List history (paginated) |
+| `/api/history/{id}` | GET | Detail satu item |
+| `/api/history/{id}` | DELETE | Hapus item |
+| `/api/history/bulk-delete` | POST | Hapus banyak item |
 
 ---
 
-## API Routes (Backend)
+## Webhook Support
 
-### POST `/api/generate`
+### Konsep
 
-Forward generate request ke Proxy Server → Freepik API.
+Daripada polling setiap 5 detik, Freepik API bisa mengirim notifikasi langsung ke server kita saat task selesai.
+
+### Konfigurasi
+
+Tambahkan `webhook_url` di generate request:
+
+```json
+{
+  "image_url": "...",
+  "video_url": "...",
+  "character_orientation": "video",
+  "cfg_scale": 0.5,
+  "webhook_url": "https://yourdomain.com/api/webhook"
+}
+```
+
+### Webhook Receiver
+
+```
+POST /api/webhook
+```
+
+**Expected Payload dari Freepik:**
+```json
+{
+  "data": {
+    "task_id": "uuid-string",
+    "status": "COMPLETED",
+    "generated": ["https://cdn-magnific.freepik.com/...mp4"]
+  }
+}
+```
+
+### Flow dengan Webhook
+
+```
+1. User submit generate → kirim ke API dengan webhook_url
+2. API return task_id → tampilkan "Processing..."
+3. Saat selesai → API kirim POST ke webhook_url
+4. Server terima webhook → update database → notify frontend via WebSocket/SSE
+5. Frontend langsung tampilkan video (tanpa polling)
+```
+
+### Fallback
+
+Jika webhook tidak datang dalam 10 menit → fallback ke polling.
+
+### Frontend Notification
+
+Gunakan **Server-Sent Events (SSE)** atau **WebSocket** untuk push realtime ke browser:
+
+```
+GET /api/events?userId=xxx (SSE)
+```
+
+Saat webhook diterima → kirim event ke frontend:
+```json
+{
+  "type": "task_completed",
+  "taskId": "...",
+  "videoUrl": "..."
+}
+```
+
+---
+
+## Batch Generate
+
+### Konsep
+
+Upload banyak gambar + 1 video → generate semua secara bersamaan (masuk queue).
+
+### Flow
+
+```
+1. User upload 1 video (motion source)
+2. User upload multiple gambar (karakter-karakter berbeda)
+3. User klik "Batch Generate"
+4. Sistem buat task untuk setiap gambar (dengan video yang sama)
+5. Semua task masuk queue
+6. Proses satu per satu (sesuai MAX_CONCURRENT)
+7. Tampilkan progress: "3/10 selesai"
+8. Setelah semua selesai → tampilkan gallery + "Download All"
+```
+
+### UI
+
+| Element | Description |
+|---------|-------------|
+| Multi-image upload | Drag & drop atau pilih banyak file |
+| Single video upload | 1 video untuk semua |
+| Progress bar | "Processing 3/10..." |
+| Individual status | Tiap gambar punya status sendiri (waiting/processing/done/failed) |
+| Cancel button | Bisa cancel batch yang belum diproses |
+
+### Batch Data Structure
+
+```json
+{
+  "batchId": "batch-uuid",
+  "userId": "user-123",
+  "videoUrl": "https://.../video.mp4",
+  "model": "kling-2.6-standard",
+  "cfgScale": 0.5,
+  "prompt": "...",
+  "items": [
+    { "id": "item-1", "imageUrl": "...", "status": "completed", "resultUrl": "..." },
+    { "id": "item-2", "imageUrl": "...", "status": "processing", "taskId": "..." },
+    { "id": "item-3", "imageUrl": "...", "status": "waiting" }
+  ],
+  "totalItems": 10,
+  "completedItems": 3,
+  "createdAt": "..."
+}
+```
+
+---
+
+## Credit Tracking
+
+### Konsep
+
+Tampilkan sisa credit/balance dari Magnific/Freepik account di dashboard.
+
+### Implementation
+
+Ada 2 cara:
+1. **API call ke Magnific** (jika ada endpoint balance) — cek docs
+2. **Track manual** — catat setiap kali generate, kurangi dari estimasi
+
+### Manual Tracking
+
+| Model | Estimasi Cost per Generate |
+|-------|---------------------------|
+| Kling 2.6 Standard | ~$0.10 |
+| Kling 2.6 Pro | ~$0.20 |
+| Kling 3.0 Standard | ~$0.15 |
+| Kling 3.0 Pro | ~$0.30 |
+
+### UI
+
+```
+┌────────────────────────┐
+│  💰 Credit: €487.50    │
+│  📊 Used today: €12.50 │
+│  🎬 Generations: 42    │
+└────────────────────────┘
+```
+
+### Data Structure
+
+```json
+{
+  "userId": "user-123",
+  "totalCredit": 500.00,
+  "usedCredit": 12.50,
+  "remainingCredit": 487.50,
+  "transactions": [
+    { "date": "2025-05-15T10:00:00Z", "model": "kling-2.6-std", "cost": 0.10, "taskId": "..." },
+    { "date": "2025-05-15T10:05:00Z", "model": "kling-3.0-pro", "cost": 0.30, "taskId": "..." }
+  ]
+}
+```
+
+---
+
+## Auto Compress Image
+
+### Konsep
+
+Otomatis compress/resize gambar di browser sebelum upload, supaya:
+- Tidak terlalu besar (hemat bandwidth)
+- Sesuai spesifikasi API (min 340px, max 10MB)
+- Optimal untuk hasil terbaik
+
+### Logic
+
+```
+1. User pilih gambar
+2. Client-side check:
+   - Jika > 10MB → compress sampai < 10MB
+   - Jika < 340px → reject dengan error
+   - Jika > 2048px → resize ke max 2048px (keep aspect ratio)
+3. Compress menggunakan Canvas API di browser
+4. Output: JPEG quality 85% (atau PNG jika transparent)
+5. Upload file yang sudah di-compress
+```
+
+### Settings
+
+```json
+{
+  "maxWidth": 2048,
+  "maxHeight": 2048,
+  "maxFileSize": 10485760,
+  "quality": 0.85,
+  "format": "jpeg"
+}
+```
+
+### UI
+
+- Tampilkan ukuran sebelum & sesudah compress
+- Badge: "Compressed: 4.2MB → 1.1MB"
+
+---
+
+## Download All (ZIP)
+
+### Konsep
+
+Download semua hasil video dari batch generate atau history sebagai file ZIP.
+
+### Flow
+
+```
+1. User pilih beberapa video dari gallery/batch
+2. User klik "Download All"
+3. Server fetch semua video URLs
+4. Server buat ZIP file on-the-fly (streaming)
+5. Browser download ZIP
+```
+
+### API Route
+
+```
+POST /api/download-zip
+```
 
 **Request Body:**
 ```json
 {
-  "model": "kling-2.6-standard",
-  "imageUrl": "https://...",
-  "videoUrl": "https://...",
-  "prompt": "optional",
-  "cfgScale": 0.5,
-  "apiKey": "FPSXxxx..."
+  "items": [
+    { "url": "https://cdn.../video1.mp4", "filename": "character1_kling26.mp4" },
+    { "url": "https://cdn.../video2.mp4", "filename": "character2_kling26.mp4" }
+  ]
 }
 ```
 
-**Backend Logic:**
-1. Validasi input
-2. Forward ke proxy server (`PROXY_URL/proxy/generate`)
-3. Sertakan API key di header `x-proxy-api-key`
-4. Return response ke frontend
+**Response:** ZIP file stream (Content-Type: application/zip)
 
-### GET `/api/status`
+### Alternatif (Client-side)
 
-Check status task via Proxy.
-
-**Query Params:**
-- `taskId` — Task ID dari generate response
-- `model` — Model yang digunakan
-- `apiKey` — API key user
-
-### POST `/api/upload`
-
-Upload file ke server dan return URL publik.
-
-**Request:** `multipart/form-data` dengan field `file`
-
-**Response:**
-```json
-{
-  "url": "https://yourdomain.com/upload/filename.jpg"
-}
+Untuk file kecil, bisa juga buat ZIP di browser menggunakan library `JSZip`:
 ```
+1. Fetch semua video URLs di browser
+2. Buat ZIP menggunakan JSZip
+3. Trigger download
+```
+
+---
+
+## Application Flow (Complete)
+
+### Single Generate
+
+```
+1. User login
+2. Upload gambar (auto-compress) → URL
+3. Upload video → URL
+4. Set model, CFG, prompt
+5. Klik Generate
+6. Masuk queue (tampilkan posisi)
+7. Proxy pilih key (rotation) → kirim ke API
+8. Webhook terima notifikasi selesai (atau fallback polling)
+9. Update history + tampilkan video
+10. Update credit tracking
+```
+
+### Batch Generate
+
+```
+1. User login
+2. Upload 1 video → URL
+3. Upload N gambar (auto-compress each) → URLs
+4. Set model, CFG, prompt (sama untuk semua)
+5. Klik "Batch Generate"
+6. Buat N tasks → semua masuk queue
+7. Proses sesuai MAX_CONCURRENT
+8. Progress: "3/10 selesai"
+9. Setelah semua selesai → tampilkan gallery
+10. "Download All" → ZIP
+```
+
+---
+
+## Web App Pages
+
+| Page | Path | Description |
+|------|------|-------------|
+| Landing | `/` | Landing page / redirect ke login |
+| Login | `/login` | Login form |
+| Register | `/register` | Register form |
+| Dashboard | `/dashboard` | Generate form + status |
+| Batch | `/batch` | Batch generate interface |
+| History | `/history` | Gallery semua hasil |
+| Settings | `/settings` | API key, default model, profile |
+| Queue | `/queue` | Status antrian (admin) |
 
 ---
 
@@ -476,50 +671,56 @@ Upload file ke server dan return URL publik.
 ### Web App (.env)
 
 ```env
-# Proxy server URL (self-hosted)
+# Database
+DATABASE_URL=sqlite:///path/to/db.sqlite
+# atau: postgres://user:pass@localhost/motioncontrol
+
+# Auth
+JWT_SECRET=random-secret-string
+NEXTAUTH_URL=https://yourdomain.com/apps
+
+# Proxy
 PROXY_URL=https://yourdomain.com/proxy
 
-# Opsional: default API key jika tidak pakai proxy
-DEFAULT_API_KEY=FPSXxxx...
+# Upload
+UPLOAD_DIR=/path/to/upload/folder
+UPLOAD_URL=https://yourdomain.com/upload
+
+# Queue
+MAX_CONCURRENT=3
+MAX_QUEUE_PER_USER=5
+
+# Webhook
+WEBHOOK_BASE_URL=https://yourdomain.com/api/webhook
+
+# Credit (estimasi cost per model)
+COST_KLING_26_STD=0.10
+COST_KLING_26_PRO=0.20
+COST_KLING_30_STD=0.15
+COST_KLING_30_PRO=0.30
 ```
 
 ### Proxy Server (.env)
 
 ```env
-# Multiple API keys dipisah koma
-API_KEYS=FPSXkey1xxx,FPSXkey2xxx,FPSXkey3xxx
-
-# Port proxy server
+API_KEYS=FPSXkey1,FPSXkey2,FPSXkey3,FPSXkey4
 PORT=3002
-
-# Allowed origins (CORS)
-ALLOWED_ORIGINS=https://yourdomain.com,https://motioncontrol-iota.vercel.app
+ALLOWED_ORIGINS=https://yourdomain.com
 ```
 
 ---
 
-## Deployment
-
-### Option A: Vercel (Web App) + Self-hosted Proxy
+## Deployment (Full Self-hosted)
 
 ```
-Web App (Vercel) → Proxy (homeserver:3002) → api.freepik.com
+Web App (port 3001) ─────┐
+                          │
+Proxy Server (port 3002) ─┼── Nginx (port 443) ── Internet
+                          │
+File Uploads (disk) ──────┘
 ```
 
-- Web app di Vercel (gratis, auto-deploy)
-- Proxy di homeserver (handle rotation + bypass limit)
-
-### Option B: Full Self-hosted
-
-```
-Web App (homeserver:3001) → Proxy (homeserver:3002) → api.freepik.com
-```
-
-- Semua di homeserver
-- Tidak ada file size limit
-- Full control
-
-### Nginx Config (Full Self-hosted)
+### Nginx Config
 
 ```nginx
 server {
@@ -534,7 +735,6 @@ server {
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_cache_bypass $http_upgrade;
     }
 
     # Proxy server
@@ -543,13 +743,19 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
     # File uploads
     location /upload/ {
         alias /path/to/upload/folder/;
         autoindex off;
+    }
+
+    # Webhook receiver (public)
+    location /api/webhook {
+        proxy_pass http://localhost:3001/api/webhook;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 }
 ```
@@ -560,24 +766,25 @@ server {
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| "All API keys have reached daily limit" | Semua key limited | Tunggu 24 jam / tambah key baru |
-| "Daily limit reached" (single key) | Satu key limited | Otomatis rotation ke key lain |
-| "FAILED" (status) | File tidak valid / credit habis | Cek spesifikasi file & balance |
-| "Request Entity Too Large" | File > 4.5MB via Vercel | Self-host atau paste URL langsung |
-| Non-JSON response | API return text bukan JSON | Parse text, tampilkan sebagai error |
-| Proxy unreachable | Homeserver down | Fallback ke direct API call |
+| "All API keys limited" | Semua key habis | Tunggu 24 jam / tambah key |
+| "Queue full" | Antrian penuh | Tunggu / naikkan limit |
+| "FAILED" status | File invalid / credit habis | Cek file & balance |
+| "File too large" | Gambar > 10MB | Auto-compress handle ini |
+| Webhook timeout | Webhook tidak datang | Fallback ke polling |
+| Auth expired | JWT expired | Auto-redirect ke login |
 
 ---
 
-## Polling Configuration
+## Polling & Webhook Configuration
 
 | Setting | Value |
 |---------|-------|
-| Poll interval | 5 detik |
-| Max timeout | 600 detik (10 menit) |
-| Stop condition | Status = COMPLETED / FAILED |
-| Status comparison | Case-insensitive (`.toLowerCase()`) |
-| Video URL extraction | `data.generated[0]` |
+| Poll interval (fallback) | 5 detik |
+| Max poll timeout | 600 detik |
+| Webhook timeout | 600 detik (fallback to polling) |
+| Stop condition | COMPLETED / FAILED |
+| Status comparison | Case-insensitive |
+| Video URL | `data.generated[0]` |
 
 ---
 
