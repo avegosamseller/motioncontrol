@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const MODEL_TASK_ENDPOINTS: Record<string, string> = {
-  "kling-2.6-standard": "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6",
-  "kling-2.6-pro": "https://api.magnific.com/v1/ai/image-to-video/kling-v2-6",
-  "kling-3.0-standard": "https://api.magnific.com/v1/ai/video/kling-v3-motion-control-std",
-  "kling-3.0-pro": "https://api.magnific.com/v1/ai/video/kling-v3-motion-control-pro",
+  "kling-2.6-standard": "https://api.freepik.com/v1/ai/image-to-video/kling-v2-6",
+  "kling-2.6-pro": "https://api.freepik.com/v1/ai/image-to-video/kling-v2-6",
+  "kling-3.0-standard": "https://api.freepik.com/v1/ai/video/kling-v3-motion-control-std",
+  "kling-3.0-pro": "https://api.freepik.com/v1/ai/video/kling-v3-motion-control-pro",
 };
 
 export async function GET(request: NextRequest) {
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     const response = await fetch(endpoint, {
       method: "GET",
       headers: {
-        "x-magnific-api-key": apiKey,
+        "x-freepik-api-key": apiKey,
       },
     });
 

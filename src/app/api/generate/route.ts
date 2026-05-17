@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const MODEL_ENDPOINTS: Record<string, string> = {
-  "kling-2.6-standard": "https://api.magnific.com/v1/ai/video/kling-v2-6-motion-control-std",
-  "kling-2.6-pro": "https://api.magnific.com/v1/ai/video/kling-v2-6-motion-control-pro",
-  "kling-3.0-standard": "https://api.magnific.com/v1/ai/video/kling-v3-motion-control-std",
-  "kling-3.0-pro": "https://api.magnific.com/v1/ai/video/kling-v3-motion-control-pro",
+  "kling-2.6-standard": "https://api.freepik.com/v1/ai/video/kling-v2-6-motion-control-std",
+  "kling-2.6-pro": "https://api.freepik.com/v1/ai/video/kling-v2-6-motion-control-pro",
+  "kling-3.0-standard": "https://api.freepik.com/v1/ai/video/kling-v3-motion-control-std",
+  "kling-3.0-pro": "https://api.freepik.com/v1/ai/video/kling-v3-motion-control-pro",
 };
 
 function isValidUrl(str: string): boolean {
@@ -44,17 +44,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate that URLs are actual public URLs, not base64 data
     if (!isValidUrl(imageUrl)) {
       return NextResponse.json(
-        { error: "Image must be a public URL (https://...). File uploads are not supported directly — please upload your image to a hosting service first and paste the URL." },
+        { error: "Image must be a public URL (https://...)." },
         { status: 400 }
       );
     }
 
     if (!isValidUrl(videoUrl)) {
       return NextResponse.json(
-        { error: "Video must be a public URL (https://...). File uploads are not supported directly — please upload your video to a hosting service first and paste the URL." },
+        { error: "Video must be a public URL (https://...)." },
         { status: 400 }
       );
     }
@@ -64,6 +63,7 @@ export async function POST(request: NextRequest) {
     const payload: Record<string, unknown> = {
       image_url: imageUrl,
       video_url: videoUrl,
+      character_orientation: "video",
     };
 
     if (prompt && prompt.trim()) {
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-magnific-api-key": apiKey,
+        "x-freepik-api-key": apiKey,
       },
       body: JSON.stringify(payload),
     });
@@ -97,7 +97,6 @@ export async function POST(request: NextRequest) {
           { status: response.status }
         );
       }
-      // Try parsing as JSON anyway
       try {
         data = JSON.parse(text);
       } catch {
