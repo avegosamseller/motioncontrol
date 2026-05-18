@@ -5,20 +5,6 @@ import { useState, useRef, useCallback, useEffect } from "react";
 type TaskStatus = "idle" | "submitting" | "processing" | "completed" | "failed";
 type UploadStatus = "idle" | "uploading" | "done" | "error";
 
-interface TaskResult {
-  id?: string;
-  status?: string;
-  video_url?: string;
-  video?: { url: string }[];
-  data?: {
-    id?: string;
-    status?: string;
-    video_url?: string;
-    video?: { url: string }[];
-    output?: { video_url?: string };
-  };
-}
-
 export default function Home() {
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("kling-2.6-standard");
@@ -35,52 +21,35 @@ export default function Home() {
   const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   const uploadFile = async (file: File): Promise<string> => {
-    // Upload via our server-side proxy to catbox.moe
     const formData = new FormData();
     formData.append("file", file);
-
-    const response = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-    });
-
+    const response = await fetch("/api/upload", { method: "POST", body: formData });
     const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || "Upload failed");
-    }
-
+    if (!response.ok) throw new Error(data.error || "Upload failed");
     return data.url;
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // Show preview immediately
     const reader = new FileReader();
-    reader.onload = () => {
-      setImagePreview(reader.result as string);
-    };
+    reader.onload = () => setImagePreview(reader.result as string);
     reader.readAsDataURL(file);
-
-    // Upload to catbox
     setImageUploadStatus("uploading");
     setError(null);
-
     try {
       const url = await uploadFile(file);
       setImageUrl(url);
       setImageUploadStatus("done");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Image upload failed";
-      setError(message);
+      setError(err instanceof Error ? err.message : "Image upload failed");
       setImageUploadStatus("error");
     }
   };
@@ -88,85 +57,52 @@ export default function Home() {
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // Show preview immediately
     const reader = new FileReader();
-    reader.onload = () => {
-      setVideoPreview(reader.result as string);
-    };
+    reader.onload = () => setVideoPreview(reader.result as string);
     reader.readAsDataURL(file);
-
-    // Upload to catbox
     setVideoUploadStatus("uploading");
     setError(null);
-
     try {
       const url = await uploadFile(file);
       setVideoUrl(url);
       setVideoUploadStatus("done");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Video upload failed";
-      setError(message);
+      setError(err instanceof Error ? err.message : "Video upload failed");
       setVideoUploadStatus("error");
     }
   };
 
-  const extractVideoUrl = (result: TaskResult): string | null => {
-    if (result.video_url) return result.video_url;
-    if (result.video && result.video.length > 0) return result.video[0].url;
-    if (result.data) {
-      if (result.data.video_url) return result.data.video_url;
-      if (result.data.video && result.data.video.length > 0) return result.data.video[0].url;
-      if (result.data.output?.video_url) return result.data.output.video_url;
-    }
-    return null;
-  };
-
   const checkStatus = useCallback(async () => {
     if (!taskId || !apiKey) return;
-
     try {
-      const params = new URLSearchParams({
-        taskId,
-        model,
-        apiKey,
-      });
-
+      const params = new URLSearchParams({ taskId, model, apiKey });
       const response = await fetch(`/api/status?${params}`);
       const data = await response.json();
-
       if (!response.ok) {
         setError(data.error || "Failed to check status");
         setTaskStatus("failed");
         if (pollingRef.current) clearInterval(pollingRef.current);
         return;
       }
-
       const status = (data.data?.status || data.status || "").toLowerCase();
-      setStatusMessage(`Status: ${status}`);
-
+      setStatusMessage(`${status}`);
       if (status === "completed" || status === "succeed" || status === "done") {
-        // Extract video URL from various response formats
-        let videoResultUrl = extractVideoUrl(data);
-        
-        // Also check "generated" array (Magnific format: { data: { generated: ["url"] } })
-        if (!videoResultUrl && data.data?.generated && Array.isArray(data.data.generated) && data.data.generated.length > 0) {
-          videoResultUrl = data.data.generated[0];
-        }
-        if (!videoResultUrl && data.generated && Array.isArray(data.generated) && data.generated.length > 0) {
-          videoResultUrl = data.generated[0];
-        }
-
-        if (videoResultUrl) {
-          setResultVideoUrl(videoResultUrl);
+        let videoResult = null;
+        if (data.data?.generated?.length > 0) videoResult = data.data.generated[0];
+        else if (data.generated?.length > 0) videoResult = data.generated[0];
+        else if (data.data?.video_url) videoResult = data.data.video_url;
+        else if (data.video_url) videoResult = data.video_url;
+        if (videoResult) {
+          setResultVideoUrl(videoResult);
           setTaskStatus("completed");
         } else {
-          setError("Video completed but no URL found in response");
+          setError("Completed but no video URL found");
           setTaskStatus("failed");
         }
         if (pollingRef.current) clearInterval(pollingRef.current);
       } else if (status === "failed" || status === "error") {
-        setError(data.data?.error || data.error || "Generation failed");
+        const d = data.data || {};
+        setError(d.error || d.message || data.error || `Generation failed. Response: ${JSON.stringify(data).substring(0, 200)}`);
         setTaskStatus("failed");
         if (pollingRef.current) clearInterval(pollingRef.current);
       }
@@ -178,9 +114,7 @@ export default function Home() {
   useEffect(() => {
     if (taskStatus === "processing" && taskId) {
       pollingRef.current = setInterval(checkStatus, 5000);
-      return () => {
-        if (pollingRef.current) clearInterval(pollingRef.current);
-      };
+      return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
     }
   }, [taskStatus, taskId, checkStatus]);
 
@@ -188,160 +122,90 @@ export default function Home() {
     setError(null);
     setResultVideoUrl(null);
     setStatusMessage("");
-
-    if (!apiKey) {
-      setError("Please enter your Magnific API Key");
-      return;
-    }
-    if (!imageUrl) {
-      setError("Please upload a reference image or provide an image URL");
-      return;
-    }
-    if (!videoUrl) {
-      setError("Please upload a reference video or provide a video URL");
-      return;
-    }
-    if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) {
-      setError("Image URL must be a public URL starting with https://");
-      return;
-    }
-    if (!videoUrl.startsWith("http://") && !videoUrl.startsWith("https://")) {
-      setError("Video URL must be a public URL starting with https://");
-      return;
-    }
-
+    if (!apiKey) { setError("Masukkan API Key terlebih dahulu"); return; }
+    if (!imageUrl) { setError("Upload gambar referensi terlebih dahulu"); return; }
+    if (!videoUrl) { setError("Upload video motion terlebih dahulu"); return; }
+    if (!imageUrl.startsWith("http")) { setError("Image URL harus berupa URL publik (https://...)"); return; }
+    if (!videoUrl.startsWith("http")) { setError("Video URL harus berupa URL publik (https://...)"); return; }
     setTaskStatus("submitting");
-
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          imageUrl,
-          videoUrl,
-          prompt,
-          cfgScale,
-          apiKey,
-        }),
+        body: JSON.stringify({ model, imageUrl, videoUrl, prompt, cfgScale, apiKey }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || "Failed to submit generation request");
-        setTaskStatus("failed");
-        return;
-      }
-
-      // Try to extract task ID from various response formats
-      const id = data.data?.id || data.data?.task_id || data.id || data.task_id || data.taskId || data.data?.taskId;
+      if (!response.ok) { setError(data.error || "Generate gagal"); setTaskStatus("failed"); return; }
+      const id = data.data?.id || data.data?.task_id || data.id || data.task_id || data.taskId;
       if (id) {
         setTaskId(id);
         setTaskStatus("processing");
-        setStatusMessage("Task submitted. Waiting for processing...");
+        setStatusMessage("processing");
       } else {
-        // Maybe the response already contains the video
-        const videoResultUrl = extractVideoUrl(data);
-        if (videoResultUrl) {
-          setResultVideoUrl(videoResultUrl);
+        if (data.data?.generated?.length > 0) {
+          setResultVideoUrl(data.data.generated[0]);
           setTaskStatus("completed");
         } else {
-          // Show the actual API response for debugging
-          setError(`No task ID found in API response. Response: ${JSON.stringify(data).substring(0, 300)}`);
+          setError(`No task ID. Response: ${JSON.stringify(data).substring(0, 200)}`);
           setTaskStatus("failed");
         }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Request failed";
-      setError(message);
+      setError(err instanceof Error ? err.message : "Request failed");
       setTaskStatus("failed");
     }
   };
 
   const resetForm = () => {
-    setTaskStatus("idle");
-    setTaskId(null);
-    setResultVideoUrl(null);
-    setError(null);
-    setStatusMessage("");
+    setTaskStatus("idle"); setTaskId(null); setResultVideoUrl(null);
+    setError(null); setStatusMessage("");
   };
 
-  const UploadBadge = ({ status }: { status: UploadStatus }) => {
-    if (status === "uploading") {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-yellow-900/50 text-yellow-300 border border-yellow-700">
-          <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          Uploading...
-        </span>
-      );
-    }
-    if (status === "done") {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-green-900/50 text-green-300 border border-green-700">
-          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          Uploaded
-        </span>
-      );
-    }
-    if (status === "error") {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-900/50 text-red-300 border border-red-700">
-          Failed
-        </span>
-      );
-    }
-    return null;
-  };
+  const isUploading = imageUploadStatus === "uploading" || videoUploadStatus === "uploading";
+  const isBusy = taskStatus === "submitting" || taskStatus === "processing" || isUploading;
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-4 md:p-8">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
-            🎬 Motion Control Generator
-          </h1>
-          <p className="text-gray-400">
-            Generate motion control videos using Kling AI via Magnific API
-          </p>
-        </div>
+    <div className="min-h-screen bg-[#0a0e1a] relative overflow-hidden">
+      {/* Background gradient orbs */}
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-purple-600/20 rounded-full blur-[120px]" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-blue-600/20 rounded-full blur-[120px]" />
+        <div className="absolute top-[40%] right-[20%] w-[300px] h-[300px] bg-pink-500/10 rounded-full blur-[100px]" />
+      </div>
 
-        <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl border border-gray-700 p-6 md:p-8 space-y-6">
+      {/* Sidebar Overlay */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* Sidebar */}
+      <div className={`fixed top-0 left-0 h-full w-80 z-50 transform transition-transform duration-300 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="h-full bg-white/5 backdrop-blur-xl border-r border-white/10 p-6 flex flex-col">
+          <div className="flex justify-between items-center mb-8">
+            <h2 className="text-white font-bold text-lg">Pengaturan</h2>
+            <button onClick={() => setSidebarOpen(false)} className="text-white/60 hover:text-white text-2xl">&times;</button>
+          </div>
+
           {/* API Key */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Magnific API Key
-            </label>
+          <div className="mb-6">
+            <label className="text-white/70 text-xs font-medium uppercase tracking-wider mb-2 block">API Key</label>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter your Magnific API key..."
-              className="w-full px-4 py-3 bg-gray-900 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="FPSX..."
+              className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder-white/30 focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-all"
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Get your API key from{" "}
-              <a href="https://magnific.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
-                magnific.com
-              </a>
-            </p>
+            <p className="text-white/30 text-xs mt-1.5">Dari <a href="https://magnific.com" target="_blank" className="text-purple-400 hover:underline">magnific.com</a></p>
           </div>
 
-          {/* Model Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Model
-            </label>
+          {/* Model */}
+          <div className="mb-6">
+            <label className="text-white/70 text-xs font-medium uppercase tracking-wider mb-2 block">Model</label>
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="w-full px-4 py-3 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-purple-500/50 transition-all"
             >
               <option value="kling-2.6-standard">Kling 2.6 Standard</option>
               <option value="kling-2.6-pro">Kling 2.6 Pro</option>
@@ -350,229 +214,221 @@ export default function Home() {
             </select>
           </div>
 
-          {/* Upload Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Reference Image */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-                Reference Image (Character)
-                <UploadBadge status={imageUploadStatus} />
-              </label>
-              <div
-                onClick={() => imageInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors min-h-[200px] flex items-center justify-center ${
-                  imageUploadStatus === "uploading"
-                    ? "border-yellow-600 bg-yellow-900/10"
-                    : imageUploadStatus === "done"
-                    ? "border-green-600 bg-green-900/10"
-                    : "border-gray-600 hover:border-blue-500"
-                }`}
-              >
-                {imagePreview ? (
-                  <img
-                    src={imagePreview}
-                    alt="Reference"
-                    className="max-h-[180px] max-w-full object-contain rounded"
-                  />
-                ) : (
-                  <div className="text-gray-400">
-                    <svg className="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    <p className="text-sm">Click to upload image</p>
-                    <p className="text-xs mt-1 text-gray-500">Auto-hosted to catbox.moe</p>
-                  </div>
-                )}
-              </div>
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                className="hidden"
-              />
-              <input
-                type="text"
-                value={imageUrl}
-                onChange={(e) => {
-                  setImageUrl(e.target.value);
-                  if (e.target.value) {
-                    setImagePreview(e.target.value);
-                    setImageUploadStatus("idle");
-                  }
-                }}
-                placeholder="Or paste image URL (https://...)"
-                className="w-full mt-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            {/* Reference Video */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-                Reference Video (Motion Source)
-                <UploadBadge status={videoUploadStatus} />
-              </label>
-              <div
-                onClick={() => videoInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors min-h-[200px] flex items-center justify-center ${
-                  videoUploadStatus === "uploading"
-                    ? "border-yellow-600 bg-yellow-900/10"
-                    : videoUploadStatus === "done"
-                    ? "border-green-600 bg-green-900/10"
-                    : "border-gray-600 hover:border-blue-500"
-                }`}
-              >
-                {videoPreview ? (
-                  <video
-                    src={videoPreview}
-                    className="max-h-[180px] max-w-full object-contain rounded"
-                    controls
-                    muted
-                  />
-                ) : (
-                  <div className="text-gray-400">
-                    <svg className="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                    <p className="text-sm">Click to upload video</p>
-                    <p className="text-xs mt-1 text-gray-500">Auto-hosted to catbox.moe</p>
-                  </div>
-                )}
-              </div>
-              <input
-                ref={videoInputRef}
-                type="file"
-                accept="video/*"
-                onChange={handleVideoUpload}
-                className="hidden"
-              />
-              <input
-                type="text"
-                value={videoUrl}
-                onChange={(e) => {
-                  setVideoUrl(e.target.value);
-                  if (e.target.value) {
-                    setVideoPreview(e.target.value);
-                    setVideoUploadStatus("idle");
-                  }
-                }}
-                placeholder="Or paste video URL (https://...)"
-                className="w-full mt-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+          {/* CFG Scale */}
+          <div className="mb-6">
+            <label className="text-white/70 text-xs font-medium uppercase tracking-wider mb-2 block">
+              CFG Scale: <span className="text-purple-400">{cfgScale.toFixed(2)}</span>
+            </label>
+            <input
+              type="range" min="0" max="1" step="0.01"
+              value={cfgScale}
+              onChange={(e) => setCfgScale(parseFloat(e.target.value))}
+              className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-purple-500"
+            />
+            <div className="flex justify-between text-white/30 text-xs mt-1">
+              <span>Kreatif</span><span>Faithful</span>
             </div>
           </div>
 
           {/* Prompt */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Prompt (Optional)
-            </label>
+          <div className="mb-6">
+            <label className="text-white/70 text-xs font-medium uppercase tracking-wider mb-2 block">Prompt (Opsional)</label>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe the desired motion or style..."
+              placeholder="Deskripsi gerakan..."
               rows={3}
-              className="w-full px-4 py-3 bg-gray-900 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder-white/30 focus:outline-none focus:border-purple-500/50 resize-none transition-all"
             />
           </div>
 
-          {/* CFG Scale */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              CFG Scale: <span className="text-blue-400">{cfgScale.toFixed(2)}</span>
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={cfgScale}
-              onChange={(e) => setCfgScale(parseFloat(e.target.value))}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-            />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>0 (More creative)</span>
-              <span>1 (More faithful)</span>
-            </div>
+          {/* Telegram Bot Button */}
+          <div className="mt-auto">
+            <a
+              href="https://t.me/avegosell_bot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full py-3 bg-[#2AABEE]/20 border border-[#2AABEE]/30 rounded-xl text-[#2AABEE] font-medium text-sm hover:bg-[#2AABEE]/30 transition-all"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/></svg>
+              Telegram Bot
+            </a>
           </div>
+        </div>
+      </div>
 
-          {/* Error Message */}
-          {error && (
-            <div className="bg-red-900/30 border border-red-700 rounded-lg p-4 text-red-300 text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* Status Message */}
-          {statusMessage && taskStatus === "processing" && (
-            <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-4 text-blue-300 text-sm flex items-center gap-3">
-              <svg className="animate-spin h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      {/* Main Content */}
+      <div className="relative z-10 min-h-screen flex flex-col">
+        {/* Header */}
+        <header className="flex items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="w-10 h-10 flex items-center justify-center bg-white/5 backdrop-blur-md border border-white/10 rounded-xl hover:bg-white/10 transition-all"
+            >
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
               </svg>
-              {statusMessage}
+            </button>
+            <div>
+              <h1 className="text-white font-bold text-xl tracking-tight">AVEGOSAM STUDIO</h1>
+              <p className="text-white/40 text-xs">Motion Control AI</p>
+            </div>
+          </div>
+          <a href="https://avegosam.web.id" target="_blank" rel="noopener noreferrer" className="text-purple-400 text-xs hover:underline">avegosam.web.id</a>
+        </header>
+
+        {/* Subtitle */}
+        <div className="px-6 pb-4">
+          <p className="text-white/50 text-sm max-w-lg">
+            Buat video motion AI dari gambar karakter dan referensi video. Info lengkap cek di website <a href="https://avegosam.web.id" target="_blank" className="text-purple-400 hover:underline">avegosam.web.id</a>
+          </p>
+        </div>
+
+        {/* Main Area */}
+        <main className="flex-1 px-6 pb-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 max-w-5xl mx-auto">
+            {/* Image Card */}
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="relative bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-5 hover:border-white/20 transition-all">
+                {/* Glass line decoration */}
+                <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-white font-semibold text-sm">Gambar Karakter</h3>
+                  {imageUploadStatus === "uploading" && <span className="text-yellow-400 text-xs animate-pulse">Uploading...</span>}
+                  {imageUploadStatus === "done" && <span className="text-green-400 text-xs">Uploaded</span>}
+                  {imageUploadStatus === "error" && <span className="text-red-400 text-xs">Gagal</span>}
+                </div>
+
+                <div
+                  onClick={() => imageInputRef.current?.click()}
+                  className="relative w-full aspect-[3/4] rounded-xl overflow-hidden cursor-pointer border border-white/5 hover:border-purple-500/30 transition-all flex items-center justify-center bg-white/[0.02]"
+                >
+                  {/* Glass line on card */}
+                  <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+
+                  {imagePreview ? (
+                    <img src={imagePreview} alt="Reference" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-center p-4">
+                      <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                        <svg className="w-6 h-6 text-white/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V4.5a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v15a1.5 1.5 0 001.5 1.5z" />
+                        </svg>
+                      </div>
+                      <p className="text-white/40 text-sm">Klik untuk upload</p>
+                      <p className="text-white/20 text-xs mt-1">JPG, PNG</p>
+                    </div>
+                  )}
+                </div>
+                <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+              </div>
+            </div>
+
+            {/* Video Card */}
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-pink-500/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="relative bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-5 hover:border-white/20 transition-all">
+                {/* Glass line decoration */}
+                <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-white font-semibold text-sm">Video Referensi</h3>
+                  {videoUploadStatus === "uploading" && <span className="text-yellow-400 text-xs animate-pulse">Uploading...</span>}
+                  {videoUploadStatus === "done" && <span className="text-green-400 text-xs">Uploaded</span>}
+                  {videoUploadStatus === "error" && <span className="text-red-400 text-xs">Gagal</span>}
+                </div>
+
+                <div
+                  onClick={() => videoInputRef.current?.click()}
+                  className="relative w-full aspect-[3/4] rounded-xl overflow-hidden cursor-pointer border border-white/5 hover:border-blue-500/30 transition-all flex items-center justify-center bg-white/[0.02]"
+                >
+                  {/* Glass line on card */}
+                  <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+
+                  {videoPreview ? (
+                    <video src={videoPreview} className="w-full h-full object-cover" controls muted />
+                  ) : (
+                    <div className="text-center p-4">
+                      <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                        <svg className="w-6 h-6 text-white/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                        </svg>
+                      </div>
+                      <p className="text-white/40 text-sm">Klik untuk upload</p>
+                      <p className="text-white/20 text-xs mt-1">MP4 (2-10 detik)</p>
+                    </div>
+                  )}
+                </div>
+                <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoUpload} className="hidden" />
+              </div>
+            </div>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="max-w-5xl mx-auto mt-4">
+              <div className="bg-red-500/10 backdrop-blur-md border border-red-500/20 rounded-xl px-4 py-3 text-red-300 text-sm">
+                {error}
+              </div>
             </div>
           )}
 
-          {/* Submit Button */}
-          <button
-            onClick={taskStatus === "completed" || taskStatus === "failed" ? resetForm : handleSubmit}
-            disabled={taskStatus === "submitting" || taskStatus === "processing" || imageUploadStatus === "uploading" || videoUploadStatus === "uploading"}
-            className={`w-full py-4 rounded-lg font-semibold text-lg transition-all ${
-              taskStatus === "submitting" || taskStatus === "processing" || imageUploadStatus === "uploading" || videoUploadStatus === "uploading"
-                ? "bg-gray-600 text-gray-400 cursor-not-allowed"
-                : taskStatus === "completed" || taskStatus === "failed"
-                ? "bg-yellow-600 hover:bg-yellow-500 text-white"
-                : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30"
-            }`}
-          >
-            {imageUploadStatus === "uploading" || videoUploadStatus === "uploading"
-              ? "Uploading files..."
-              : taskStatus === "submitting"
-              ? "Submitting..."
-              : taskStatus === "processing"
-              ? "Generating Video..."
-              : taskStatus === "completed" || taskStatus === "failed"
-              ? "Generate Another"
-              : "Generate Video"}
-          </button>
+          {/* Status */}
+          {statusMessage && taskStatus === "processing" && (
+            <div className="max-w-5xl mx-auto mt-4">
+              <div className="bg-purple-500/10 backdrop-blur-md border border-purple-500/20 rounded-xl px-4 py-3 text-purple-300 text-sm flex items-center gap-3">
+                <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                Generating... ({statusMessage})
+              </div>
+            </div>
+          )}
+
+          {/* Generate Button */}
+          <div className="max-w-5xl mx-auto mt-5">
+            <button
+              onClick={taskStatus === "completed" || taskStatus === "failed" ? resetForm : handleSubmit}
+              disabled={isBusy}
+              className={`w-full py-4 rounded-2xl font-semibold text-base transition-all ${
+                isBusy
+                  ? "bg-white/5 text-white/30 cursor-not-allowed border border-white/5"
+                  : taskStatus === "completed" || taskStatus === "failed"
+                  ? "bg-white/10 text-white border border-white/20 hover:bg-white/15"
+                  : "bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg shadow-purple-500/20 hover:shadow-purple-500/40 hover:scale-[1.01]"
+              }`}
+            >
+              {isUploading ? "Mengupload..." : taskStatus === "submitting" ? "Mengirim..." : taskStatus === "processing" ? "Generating..." : taskStatus === "completed" || taskStatus === "failed" ? "Generate Lagi" : "Generate Video"}
+            </button>
+          </div>
 
           {/* Result */}
           {resultVideoUrl && taskStatus === "completed" && (
-            <div className="mt-6 bg-green-900/20 border border-green-700 rounded-lg p-6">
-              <h3 className="text-green-300 font-semibold mb-4 flex items-center gap-2">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                Video Generated Successfully!
-              </h3>
-              <video
-                src={resultVideoUrl}
-                controls
-                autoPlay
-                loop
-                className="w-full rounded-lg max-h-[500px] object-contain bg-black"
-              />
-              <a
-                href={resultVideoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-600 text-white rounded-lg text-sm transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Download Video
-              </a>
+            <div className="max-w-5xl mx-auto mt-5">
+              <div className="bg-white/5 backdrop-blur-xl border border-green-500/20 rounded-2xl p-5">
+                <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-green-500/30 to-transparent" />
+                <h3 className="text-green-400 font-semibold text-sm mb-4 flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                  Video Berhasil!
+                </h3>
+                <video src={resultVideoUrl} controls autoPlay loop className="w-full rounded-xl max-h-[400px] object-contain bg-black/50" />
+                <a
+                  href={resultVideoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl text-sm hover:bg-green-500/20 transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  Download Video
+                </a>
+              </div>
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        <p className="text-center text-gray-500 text-sm mt-6">
-          Powered by Magnific API &middot; Kling AI Motion Control &middot; Hosted via catbox.moe
-        </p>
+        </main>
       </div>
-    </main>
+    </div>
   );
 }
