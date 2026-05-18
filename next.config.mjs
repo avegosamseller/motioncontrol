@@ -1,6 +1,4 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  basePath: "/apps/motion",
-};
+const nextConfig = {};
 
 export default nextConfig;
