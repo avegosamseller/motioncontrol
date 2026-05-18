@@ -275,7 +275,10 @@ export default function Home() {
               <p className="text-white/40 text-xs">Motion Control AI</p>
             </div>
           </div>
-          <a href="https://avegosam.web.id" target="_blank" rel="noopener noreferrer" className="text-purple-400 text-xs hover:underline">avegosam.web.id</a>
+          <a href="https://avegosam.web.id" target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 bg-white/5 backdrop-blur-md border border-white/10 rounded-lg text-purple-400 text-xs font-medium hover:bg-purple-500/10 hover:border-purple-500/30 transition-all flex items-center gap-1.5">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+              avegosam.web.id
+            </a>
         </header>
 
         {/* Subtitle */}
@@ -287,7 +290,7 @@ export default function Home() {
 
         {/* Main Area */}
         <main className="flex-1 px-6 pb-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 max-w-5xl mx-auto">
+          <div className="grid grid-cols-2 gap-4 max-w-3xl mx-auto">
             {/* Image Card */}
             <div className="relative group">
               <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -304,7 +307,7 @@ export default function Home() {
 
                 <div
                   onClick={() => imageInputRef.current?.click()}
-                  className="relative w-full aspect-[3/4] rounded-xl overflow-hidden cursor-pointer border border-white/5 hover:border-purple-500/30 transition-all flex items-center justify-center bg-white/[0.02]"
+                  className="relative w-full aspect-[4/5] max-h-[280px] rounded-xl overflow-hidden cursor-pointer border border-white/5 hover:border-purple-500/30 transition-all flex items-center justify-center bg-white/[0.02]"
                 >
                   {/* Glass line on card */}
                   <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
@@ -344,7 +347,7 @@ export default function Home() {
 
                 <div
                   onClick={() => videoInputRef.current?.click()}
-                  className="relative w-full aspect-[3/4] rounded-xl overflow-hidden cursor-pointer border border-white/5 hover:border-blue-500/30 transition-all flex items-center justify-center bg-white/[0.02]"
+                  className="relative w-full aspect-[4/5] max-h-[280px] rounded-xl overflow-hidden cursor-pointer border border-white/5 hover:border-blue-500/30 transition-all flex items-center justify-center bg-white/[0.02]"
                 >
                   {/* Glass line on card */}
                   <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
@@ -371,7 +374,7 @@ export default function Home() {
 
           {/* Error */}
           {error && (
-            <div className="max-w-5xl mx-auto mt-4">
+            <div className="max-w-3xl mx-auto mt-4">
               <div className="bg-red-500/10 backdrop-blur-md border border-red-500/20 rounded-xl px-4 py-3 text-red-300 text-sm">
                 {error}
               </div>
@@ -380,7 +383,7 @@ export default function Home() {
 
           {/* Status */}
           {statusMessage && taskStatus === "processing" && (
-            <div className="max-w-5xl mx-auto mt-4">
+            <div className="max-w-3xl mx-auto mt-4">
               <div className="bg-purple-500/10 backdrop-blur-md border border-purple-500/20 rounded-xl px-4 py-3 text-purple-300 text-sm flex items-center gap-3">
                 <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
                 Generating... ({statusMessage})
@@ -389,7 +392,7 @@ export default function Home() {
           )}
 
           {/* Generate Button */}
-          <div className="max-w-5xl mx-auto mt-5">
+          <div className="max-w-3xl mx-auto mt-5">
             <button
               onClick={taskStatus === "completed" || taskStatus === "failed" ? resetForm : handleSubmit}
               disabled={isBusy}
@@ -407,7 +410,7 @@ export default function Home() {
 
           {/* Result */}
           {resultVideoUrl && taskStatus === "completed" && (
-            <div className="max-w-5xl mx-auto mt-5">
+            <div className="max-w-3xl mx-auto mt-5">
               <div className="bg-white/5 backdrop-blur-xl border border-green-500/20 rounded-2xl p-5">
                 <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-green-500/30 to-transparent" />
                 <h3 className="text-green-400 font-semibold text-sm mb-4 flex items-center gap-2">
