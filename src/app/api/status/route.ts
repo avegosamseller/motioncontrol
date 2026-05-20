@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     const response = await fetch(endpoint, {
       method: "GET",
       headers: {
-        "x-freepik-api-key": apiKey,
+        "x-magnific-api-key": apiKey,
       },
     });
 

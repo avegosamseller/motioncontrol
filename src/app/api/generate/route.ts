@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-freepik-api-key": apiKey,
+        "x-magnific-api-key": apiKey,
       },
       body: JSON.stringify(payload),
     });
